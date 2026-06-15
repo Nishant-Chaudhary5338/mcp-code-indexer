@@ -1,0 +1,199 @@
+@import 'tailwindcss';
+
+/* Design tokens — the ember/signal identity (see docs/EXPLORER_REDESIGN.md §B).
+   One accent that means execution (ember), one signal hue that means data-in-
+   motion (teal). Code identifiers (node names, paths, citations, commands)
+   render in the mono face — a dev tool should look like one. */
+@theme {
+  --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', 'Menlo', monospace;
+  --color-accent: #ff6a2b; /* ember — selection / focus / execution */
+  --color-signal: #3fd9c4; /* teal — edges-in-motion / live */
+
+  /* Semantic chrome tokens — backed by the ramp vars below so a single
+     `[data-theme]` override recolors every `bg-surface`/`text-content`/
+     `border-line` utility. Components must use these, never raw hex, so the
+     light theme actually applies. */
+  --color-page: var(--page-bg);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-content: var(--text);
+  --color-muted: var(--text-muted);
+  --color-faint: var(--text-faint);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+}
+
+/* Surface / line / text ramp + status hues. Neutral ramp tuned so meaningful
+   text clears WCAG AA on the #08090A canvas; blast-radius is err-red (honest
+   alarm), cycles stay warn-amber, so the two never collide. */
+:root {
+  --page-bg: #08090a; /* the canvas behind the graph */
+  --surface: rgba(17, 18, 20, 0.72); /* surface-1 @ 72% */
+  --surface-raised: rgba(28, 31, 35, 0.78);
+  --line: rgba(255, 255, 255, 0.075);
+  --line-strong: rgba(255, 255, 255, 0.11);
+  --text: #f2f3f5;
+  --text-muted: #9da2a9; /* floor for meaningful secondary text */
+  --text-faint: #6b7079; /* decorative only */
+  --accent-glow: 0 0 24px -6px rgba(255, 106, 43, 0.5);
+  --status-ok: #46d88a;
+  --status-warn: #f5b544;
+  --status-error: #f2606a;
+  --status-impact: #f2606a; /* blast radius = honest alarm (was magenta) */
+}
+
+/* Paper light theme — applied via `data-theme="light"` on <html> (see graphStore).
+   Same ember/signal identity on a light ground: a paper surface, a dark text
+   ramp tuned to clear WCAG AA, hairlines in black-alpha, and the ember accent
+   deepened slightly so it stays legible on white. The graph-style hues
+   (graph-style.ts) are theme-agnostic; only the chrome recolors. */
+:root[data-theme='light'] {
+  --color-accent: #e8551a; /* deepened ember — AA on paper */
+  --page-bg: #fbfbfa; /* paper ground */
+  --surface: rgba(255, 255, 255, 0.86); /* raised wells over the page */
+  --surface-raised: rgba(244, 244, 243, 0.92);
+  --line: rgba(0, 0, 0, 0.08);
+  --line-strong: rgba(0, 0, 0, 0.12);
+  --text: #1a1c1f;
+  --text-muted: #5b6068; /* floor for meaningful secondary text */
+  --text-faint: #8a9099; /* decorative only */
+  --accent-glow: 0 0 24px -6px rgba(232, 85, 26, 0.35);
+  --status-ok: #16a34a;
+  --status-warn: #b45309;
+  --status-error: #dc2626;
+  --status-impact: #dc2626;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background-color: var(--page-bg);
+  color: var(--text);
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  overflow: hidden;
+}
+
+/* Keyboard-accessible focus ring on all interactive elements (WCAG 2.4.7). */
+button:focus-visible,
+input:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Press feedback on every button (Kowalski): snappy scale, no `transition: all`. */
+button:not(:disabled) {
+  transition-property: transform, color, background-color, border-color, box-shadow;
+  transition-duration: 140ms;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+button:not(:disabled):active {
+  transform: scale(0.96);
+}
+
+/* Restrained entrance motion — orients, doesn't perform (Kowalski). */
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-panel {
+  animation: slide-in-right 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.animate-rise {
+  animation: rise-in 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Atmosphere over the graph: faint ember core glow + a teal signal wash + edge
+   vignette for depth (retuned from the old indigo). */
+.graph-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      ellipse 70% 55% at 50% 40%,
+      rgba(255, 106, 43, 0.05),
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse 60% 50% at 70% 80%,
+      rgba(63, 217, 196, 0.035),
+      transparent 65%
+    ),
+    radial-gradient(ellipse at center, transparent 42%, rgba(0, 0, 0, 0.55) 100%);
+}
+
+/* On paper, the dark edge-vignette would smudge the page — soften the wash and
+   drop it to a barely-there ink edge so the light ground reads clean. */
+:root[data-theme='light'] .graph-vignette {
+  background:
+    radial-gradient(
+      ellipse 70% 55% at 50% 40%,
+      rgba(232, 85, 26, 0.045),
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse 60% 50% at 70% 80%,
+      rgba(63, 217, 196, 0.04),
+      transparent 65%
+    ),
+    radial-gradient(ellipse at center, transparent 50%, rgba(0, 0, 0, 0.06) 100%);
+}
+
+/* Glass surface treatment (Linear/Raycast): hairline lit edge over blur, tuned
+   to the dark ember surfaces. */
+.glass {
+  background: rgba(17, 18, 20, 0.72);
+  backdrop-filter: blur(20px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.05),
+    0 8px 30px -12px rgba(0, 0, 0, 0.65);
+}
+
+/* Glass on paper: opaque-ish white well, ink hairline, and a soft drop shadow
+   instead of the lit top edge — the same depth language, inverted ground. */
+:root[data-theme='light'] .glass {
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.7),
+    0 8px 30px -14px rgba(0, 0, 0, 0.22);
+}
+
+/* Honor the OS "reduce motion" setting (WCAG 2.3.3). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  button:not(:disabled):active {
+    transform: none;
+  }
+}

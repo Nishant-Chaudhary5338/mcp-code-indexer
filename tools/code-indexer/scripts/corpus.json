@@ -1,0 +1,56 @@
+[
+  {
+    "name": "vite-react-ts-template",
+    "gitUrl": "https://github.com/vitejs/vite.git",
+    "ref": "main",
+    "subdir": "packages/create-vite/template-react-ts",
+    "kind": "vite-react-template",
+    "comment": "The canonical Vite + React + TS starter, scaffolded from the official template. Smallest plain SPA shape: a handful of .tsx files under src/ with a single tsconfig. Baseline that every real React app is a superset of."
+  },
+  {
+    "name": "radix-primitives",
+    "gitUrl": "https://github.com/radix-ui/primitives.git",
+    "ref": "main",
+    "subdir": "packages/react",
+    "kind": "barrel-component-library",
+    "comment": "Radix UI primitives: a barrel-heavy, deeply-nested component library (dozens of packages each re-exporting via `export * from`). Stresses import/reference resolution across many index.ts barrels and PascalCase .tsx components, exactly the renders/calls recall surface."
+  },
+  {
+    "name": "shadcn-ui-monorepo",
+    "gitUrl": "https://github.com/shadcn-ui/ui.git",
+    "ref": "main",
+    "subdir": "apps/www",
+    "kind": "turbo-monorepo-app",
+    "comment": "A real turborepo monorepo (apps/* + packages/*). Pointing root at apps/www makes the engine walk up to the turbo.json root and index the whole workspace, exercising depends-on (package->package) and multi-package discovery."
+  },
+  {
+    "name": "nextjs-commerce",
+    "gitUrl": "https://github.com/vercel/commerce.git",
+    "ref": "main",
+    "kind": "nextjs-app",
+    "comment": "Vercel's Next.js Commerce: a non-`src` App-Router layout (app/, components/, lib/) with server + client components. Proves the engine indexes Next.js conventions driven by the repo's own tsconfig rather than a hard-coded src/ allowlist."
+  },
+  {
+    "name": "excalidraw",
+    "gitUrl": "https://github.com/excalidraw/excalidraw.git",
+    "ref": "master",
+    "subdir": "packages/excalidraw",
+    "kind": "large-react-app",
+    "comment": "Excalidraw: a large, real-world React + TS canvas app inside a yarn-workspaces monorepo. High file count and dense intra-package calls/renders — a throughput and recall stress test (will brush against maxFilesPerPackage)."
+  },
+  {
+    "name": "react-hook-form",
+    "gitUrl": "https://github.com/react-hook-form/react-hook-form.git",
+    "ref": "master",
+    "kind": "typescript-library",
+    "comment": "react-hook-form: a single-package, hook-heavy TS library (mostly .ts, few components). Proves the function-node / `calls`-edge path on a codebase that is almost all functions and almost no JSX."
+  },
+  {
+    "name": "cal-com",
+    "gitUrl": "https://github.com/calcom/cal.com.git",
+    "ref": "main",
+    "subdir": "apps/web",
+    "kind": "large-turbo-monorepo",
+    "comment": "Cal.com: a very large Next.js turborepo (apps/* + packages/*). The heaviest entry in the corpus — many workspace packages and thousands of files. Validates discovery, the per-package file budget, and that one slow/huge repo can't break the run."
+  }
+]

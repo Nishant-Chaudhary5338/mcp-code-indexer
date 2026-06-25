@@ -103,8 +103,11 @@ export const discoverWorkspace = (startDir: string): Workspace => {
         raw.push({ pkg, absPath });
       }
     }
-  } else {
-    // Standalone single-package repo — the root itself is the only package.
+  }
+  // Fall back to single-package mode when there is no workspace file, or when a
+  // workspace file exists only for config (e.g. pnpm `ignoredBuiltDependencies`)
+  // and declares no packages — otherwise the root repo never gets indexed.
+  if (raw.length === 0) {
     raw.push({ pkg: rootPkg, absPath: root });
   }
 

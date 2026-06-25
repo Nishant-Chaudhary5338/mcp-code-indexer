@@ -118,3 +118,42 @@ export const nodeSize = (loc: number, childCount: number): number => {
   const scaled = MIN_SIZE + Math.log10(weight + 1) * 2.4;
   return Math.min(MAX_SIZE, Math.max(MIN_SIZE, scaled));
 };
+
+/**
+ * Render-cost tier derived from the visible graph size. Large graphs freeze on
+ * software-rendered canvas / weaker GPUs (notably Windows laptops) because every
+ * link animates a directional particle and is drawn as a bezier curve, every 3D
+ * node is a high-poly sphere, and the bloom pass runs full-screen each frame.
+ * Above these thresholds we drop the expensive-but-cosmetic effects and bound the
+ * force-sim settle so the main thread is never pinned for long.
+ */
+export type PerfTier = {
+  /** Curve links (pretty) vs straight (much cheaper to paint). */
+  curveLinks: boolean;
+  /** Animate a particle on EVERY link — fine when small, lethal at scale. */
+  ambientParticles: boolean;
+  /** Sphere segments for 3D nodes — fewer = lighter geometry. */
+  nodeResolution: number;
+  /** Full-screen bloom post-process (3D dark mode only). */
+  bloom: boolean;
+  /** Force-sim tick budget — fewer ticks settle faster on huge graphs. */
+  cooldownTicks: number;
+  /** Hard cap (ms) on settle time so a big graph can't freeze indefinitely. */
+  cooldownTime: number;
+  /** Min canvas zoom before 2D node labels are drawn (higher = fewer at scale). */
+  labelScale: number;
+};
+
+export const perfTierFor = (nodeCount: number, linkCount: number): PerfTier => {
+  const heavy = nodeCount > 500 || linkCount > 1200;
+  const huge = nodeCount > 1500 || linkCount > 4000;
+  return {
+    curveLinks: !heavy,
+    ambientParticles: !heavy,
+    nodeResolution: huge ? 6 : heavy ? 10 : 18,
+    bloom: !heavy,
+    cooldownTicks: huge ? 100 : heavy ? 160 : 240,
+    cooldownTime: huge ? 4000 : heavy ? 8000 : 15000,
+    labelScale: heavy ? 1.6 : 1.1,
+  };
+};

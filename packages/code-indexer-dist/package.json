@@ -1,6 +1,6 @@
 {
   "name": "code-graph-indexer",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "mcpName": "io.github.nishant-chaudhary5338/mcp-code-indexer",
   "description": "Index any TypeScript/React repo (incl. monorepos) into a queryable code graph — npx CLI, HTTP/WS server, and MCP server. Reverse queries (who-renders/who-calls/find-references), blast-radius, cycles, dead-code orphans, symbol signatures, external (node_modules) deps, semantic search, and a context-pack for AI agents.",

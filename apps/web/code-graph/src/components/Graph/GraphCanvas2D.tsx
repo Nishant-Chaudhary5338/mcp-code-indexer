@@ -12,6 +12,7 @@ import {
   dimmedColor,
   HOT_EDGE_COLOR,
   nodeSize,
+  perfTierFor,
   type Theme,
 } from '../../lib/graph-style';
 import { useElementSize } from '../../lib/useElementSize';
@@ -48,7 +49,6 @@ type ForceLink = {
   weight: number;
 };
 
-const COOLDOWN_TICKS = 240;
 const linkEnd = (end: string | ForceNode): string =>
   typeof end === 'string' ? end : end.id;
 
@@ -103,6 +103,24 @@ export const GraphCanvas2D = ({
       links: filtered.visLinks.map((l) => ({ ...l })),
     }),
     [filtered],
+  );
+
+  // Node size is structural (loc + child count) and never changes between frames,
+  // so precompute it once per visible set instead of recomputing for every node on
+  // every paint (2.5k nodes × 60fps was pure waste and a key jank source).
+  const sizeOf = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const n of data.nodes) {
+      const childCount = index.childrenOf.get(n.id)?.length ?? 0;
+      m.set(n.id, nodeSize(hasMetrics(n) ? n.metrics.loc : 0, childCount));
+    }
+    return m;
+  }, [data.nodes, index]);
+
+  // Degrade cosmetic effects + bound settle time as the visible graph grows.
+  const perf = useMemo(
+    () => perfTierFor(data.nodes.length, data.links.length),
+    [data],
   );
 
   // Adjacency over the visible links → trace a node's neighbours on hover.
@@ -190,10 +208,7 @@ export const GraphCanvas2D = ({
     return nodeTypeColor(node.type, theme);
   };
 
-  const valFor = (node: ForceNode): number => {
-    const childCount = index.childrenOf.get(node.id)?.length ?? 0;
-    return nodeSize(hasMetrics(node) ? node.metrics.loc : 0, childCount);
-  };
+  const valFor = (node: ForceNode): number => sizeOf.get(node.id) ?? 3;
 
   const linkHot = (link: ForceLink): boolean =>
     hoverId !== null &&
@@ -222,7 +237,7 @@ export const GraphCanvas2D = ({
 
     // Labels only when zoomed in enough to be readable, and never on dimmed nodes.
     const isDimmed = color === dimmed;
-    if (globalScale > 1.1 && !isDimmed) {
+    if (globalScale > perf.labelScale && !isDimmed) {
       const fontSize = Math.min(5, 11 / globalScale);
       ctx.font = `500 ${fontSize}px ui-sans-serif, system-ui, sans-serif`;
       ctx.textAlign = 'center';
@@ -250,7 +265,7 @@ export const GraphCanvas2D = ({
         }}
         nodeCanvasObject={(n, ctx, scale) => drawNode(n as ForceNode, ctx, scale)}
         nodeCanvasObjectMode={() => 'replace'}
-        linkCurvature={0.12}
+        linkCurvature={perf.curveLinks ? 0.12 : 0}
         linkColor={(l) =>
           linkHot(l as ForceLink)
             ? HOT_EDGE_COLOR[theme]
@@ -262,7 +277,8 @@ export const GraphCanvas2D = ({
         linkDirectionalParticles={(l) => (linkHot(l as ForceLink) ? 4 : 0)}
         linkDirectionalParticleWidth={(l) => (linkHot(l as ForceLink) ? 2.5 : 1.1)}
         linkDirectionalParticleSpeed={0.006}
-        cooldownTicks={COOLDOWN_TICKS}
+        cooldownTicks={perf.cooldownTicks}
+        cooldownTime={perf.cooldownTime}
         onEngineStop={handleEngineStop}
         onZoom={markUserMoved}
         onNodeDrag={markUserMoved}

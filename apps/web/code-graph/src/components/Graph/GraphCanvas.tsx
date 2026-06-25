@@ -15,6 +15,7 @@ import {
   dimmedColor,
   HOT_EDGE_COLOR,
   nodeSize,
+  perfTierFor,
   type Theme,
 } from '../../lib/graph-style';
 import { useElementSize } from '../../lib/useElementSize';
@@ -51,7 +52,6 @@ type ForceLink = {
   weight: number;
 };
 
-const COOLDOWN_TICKS = 240;
 const linkEnd = (end: string | ForceNode): string =>
   typeof end === 'string' ? end : end.id;
 
@@ -108,6 +108,24 @@ export const GraphCanvas = ({
       links: filtered.visLinks.map((l) => ({ ...l })),
     }),
     [filtered],
+  );
+
+  // Node size is structural and frame-invariant — precompute once per visible set
+  // rather than recomputing nodeSize() for every node on every frame.
+  const sizeOf = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const n of data.nodes) {
+      const childCount = index.childrenOf.get(n.id)?.length ?? 0;
+      m.set(n.id, nodeSize(hasMetrics(n) ? n.metrics.loc : 0, childCount));
+    }
+    return m;
+  }, [data.nodes, index]);
+
+  // Degrade cosmetic GPU effects (ambient particles, bloom, sphere poly count) and
+  // bound settle time as the visible graph grows — the freeze fix for big graphs.
+  const perf = useMemo(
+    () => perfTierFor(data.nodes.length, data.links.length),
+    [data],
   );
 
   // Adjacency over the visible links → trace a node's neighbours on hover.
@@ -171,8 +189,9 @@ export const GraphCanvas = ({
 
     // Bloom is an additive glow — gorgeous on the near-black canvas, but on paper
     // it washes nodes into faint halos. Only add it in dark mode; light mode keeps
-    // crisp, high-contrast nodes instead.
-    if (theme === 'dark') {
+    // crisp, high-contrast nodes instead. Skip it entirely on large graphs, where
+    // the full-screen pass per frame is a major cost on weaker GPUs.
+    if (theme === 'dark' && perf.bloom) {
       // strength low + threshold high → a glow halo that keeps node colour intact.
       const bloom = new UnrealBloomPass(
         new Vector2(size.width, size.height),
@@ -183,7 +202,7 @@ export const GraphCanvas = ({
       fg.postProcessingComposer().addPass(bloom);
       bloomRef.current = bloom;
     }
-  }, [size.width, size.height, background, theme]);
+  }, [size.width, size.height, background, theme, perf.bloom]);
 
   useEffect(() => {
     if (bloomRef.current && size.width > 0) {
@@ -274,30 +293,29 @@ export const GraphCanvas = ({
         backgroundColor={background}
         showNavInfo={false}
         nodeRelSize={5}
-        nodeResolution={18}
+        nodeResolution={perf.nodeResolution}
         nodeOpacity={1}
         nodeColor={(n) => colorFor(n as ForceNode)}
-        nodeVal={(n) => {
-          const node = n as ForceNode;
-          const childCount = index.childrenOf.get(node.id)?.length ?? 0;
-          return nodeSize(hasMetrics(node) ? node.metrics.loc : 0, childCount);
-        }}
+        nodeVal={(n) => sizeOf.get((n as ForceNode).id) ?? 3}
         nodeLabel={(n) => {
           const node = n as ForceNode;
           const mark = expandable.has(node.id) ? '  ↧ click to open' : '';
           return `<div style="font:500 12px ui-sans-serif;color:#e4e4e7">${node.name}<span style="color:#71717a"> · ${node.type}${mark}</span></div>`;
         }}
-        linkCurvature={0.16}
+        linkCurvature={perf.curveLinks ? 0.16 : 0}
         linkColor={(l) =>
           linkHot(l as ForceLink)
             ? HOT_EDGE_COLOR[theme]
             : edgeTypeColor((l as ForceLink).type, theme)
         }
         linkWidth={(l) => (linkHot(l as ForceLink) ? 2 : Math.min(2, (l as ForceLink).weight))}
-        linkDirectionalParticles={(l) => (linkHot(l as ForceLink) ? 4 : 1)}
+        linkDirectionalParticles={(l) =>
+          linkHot(l as ForceLink) ? 4 : perf.ambientParticles ? 1 : 0
+        }
         linkDirectionalParticleWidth={(l) => (linkHot(l as ForceLink) ? 2.5 : 1.1)}
         linkDirectionalParticleSpeed={0.006}
-        cooldownTicks={COOLDOWN_TICKS}
+        cooldownTicks={perf.cooldownTicks}
+        cooldownTime={perf.cooldownTime}
         onEngineStop={handleEngineStop}
         onNodeHover={(n) => setHoverId(n ? (n as ForceNode).id : null)}
         onNodeClick={(n) => {

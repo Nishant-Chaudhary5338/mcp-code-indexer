@@ -98,6 +98,20 @@ export class GraphService {
     return run;
   }
 
+  /**
+   * Persist the snapshot sidecar — best-effort. The in-memory snapshot is the
+   * source of truth; the on-disk cache is an optimization, so a read-only or
+   * non-writable root (e.g. the app dir under a non-root container on Hugging
+   * Face Spaces) must not fail the index.
+   */
+  private safeWriteSnapshot(snapshot: GraphSnapshot): void {
+    try {
+      writeSnapshot(snapshot.meta.root, snapshot);
+    } catch {
+      /* disk cache is best-effort */
+    }
+  }
+
   /** Full, from-scratch index. Serialized against all other mutations. */
   indexFull(): Promise<GraphSnapshot> {
     return this.serialize(() => {
@@ -106,7 +120,7 @@ export class GraphService {
       // finished constructing it, so concurrent /api/graph reads never observe a
       // half-populated graph.
       this.snapshot = snapshot;
-      writeSnapshot(snapshot.meta.root, snapshot);
+      this.safeWriteSnapshot(snapshot);
       return snapshot;
     });
   }
@@ -194,7 +208,7 @@ export class GraphService {
       }
       // Keep the service pointer aligned with the session's (mutated) snapshot.
       this.snapshot = this.session.getSnapshot();
-      if (this.snapshot) writeSnapshot(this.snapshot.meta.root, this.snapshot);
+      if (this.snapshot) this.safeWriteSnapshot(this.snapshot);
     });
   }
 
@@ -210,7 +224,7 @@ export class GraphService {
       // reparseFiles mutates the session's snapshot in place; re-point ours to
       // the same (now-updated) object so getSnapshot() reflects the new graph.
       this.snapshot = this.session.getSnapshot();
-      if (this.snapshot) writeSnapshot(this.snapshot.meta.root, this.snapshot);
+      if (this.snapshot) this.safeWriteSnapshot(this.snapshot);
       return patch;
     });
   }

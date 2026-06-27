@@ -14,7 +14,11 @@ import {
   type GraphEdge,
   type GraphNode,
 } from '@repo/code-graph-core';
-import type { GraphService } from '../graph-service.js';
+import { rateLimit } from '../http-utils.js';
+import { resolveGraphOr, type GraphResolver } from './resolve.js';
+
+/** Bound on free-text search input, mirroring the chat question cap. */
+const MAX_QUERY_CHARS = 4000;
 
 /** The valid edge-type values, for filtering the `?types=` query param. */
 const EDGE_TYPES = new Set<string>(EdgeType.options);
@@ -71,11 +75,17 @@ const parseEdgeTypes = (raw: unknown): ReadonlySet<EdgeType> | undefined => {
  * Each request builds a `Map<id, node>` once for O(1) enrichment, returns 503
  * when the graph isn't indexed yet, and 404 when an `:id` node is unknown.
  */
-export const queryRouter = (graph: GraphService): Router => {
+export const queryRouter = (resolve: GraphResolver): Router => {
   const router = Router();
+
+  // Embedding is the single heaviest op (loads the ONNX/transformers stack) —
+  // rate-limit it like reindex so it can't be used to pin CPU on a public host.
+  const embedLimiter = rateLimit({ windowMs: 60_000, max: 5 });
 
   /** Incoming `renders` edges of `:id`, enriched with each source component. */
   router.get('/who-renders/:id', (req, res) => {
+    const graph = resolveGraphOr(resolve, req, res);
+    if (!graph) return;
     const snapshot = graph.getSnapshot();
     if (!snapshot) {
       res.status(503).json({ error: 'Graph not indexed yet' });
@@ -95,6 +105,8 @@ export const queryRouter = (graph: GraphService): Router => {
 
   /** Incoming `calls` edges of `:id`, enriched with each calling symbol. */
   router.get('/who-calls/:id', (req, res) => {
+    const graph = resolveGraphOr(resolve, req, res);
+    if (!graph) return;
     const snapshot = graph.getSnapshot();
     if (!snapshot) {
       res.status(503).json({ error: 'Graph not indexed yet' });
@@ -117,6 +129,8 @@ export const queryRouter = (graph: GraphService): Router => {
    * Each result also carries the originating `edge.type`.
    */
   router.get('/references/:id', (req, res) => {
+    const graph = resolveGraphOr(resolve, req, res);
+    if (!graph) return;
     const snapshot = graph.getSnapshot();
     if (!snapshot) {
       res.status(503).json({ error: 'Graph not indexed yet' });
@@ -140,6 +154,8 @@ export const queryRouter = (graph: GraphService): Router => {
 
   /** Everything that transitively depends on `:id` — its blast radius. */
   router.get('/blast-radius/:id', (req, res) => {
+    const graph = resolveGraphOr(resolve, req, res);
+    if (!graph) return;
     const snapshot = graph.getSnapshot();
     if (!snapshot) {
       res.status(503).json({ error: 'Graph not indexed yet' });
@@ -164,6 +180,8 @@ export const queryRouter = (graph: GraphService): Router => {
    * nodes by name/path so a UI or agent can resolve a rough name to ids.
    */
   router.get('/search', (req, res) => {
+    const graph = resolveGraphOr(resolve, req, res);
+    if (!graph) return;
     const snapshot = graph.getSnapshot();
     if (!snapshot) {
       res.status(503).json({ error: 'Graph not indexed yet' });
@@ -195,6 +213,8 @@ export const queryRouter = (graph: GraphService): Router => {
    * caps each ref list.
    */
   router.get('/context/:id', (req, res) => {
+    const graph = resolveGraphOr(resolve, req, res);
+    if (!graph) return;
     const snapshot = graph.getSnapshot();
     if (!snapshot) {
       res.status(503).json({ error: 'Graph not indexed yet' });
@@ -217,9 +237,15 @@ export const queryRouter = (graph: GraphService): Router => {
    * if embeddings haven't been built or the model is unavailable.
    */
   router.get('/semantic-search', (req, res) => {
+    const graph = resolveGraphOr(resolve, req, res);
+    if (!graph) return;
     const query = typeof req.query.query === 'string' ? req.query.query : '';
     if (query.trim().length === 0) {
       res.status(400).json({ error: 'query is required' });
+      return;
+    }
+    if (query.length > MAX_QUERY_CHARS) {
+      res.status(400).json({ error: `query exceeds ${MAX_QUERY_CHARS} characters` });
       return;
     }
     const rawTypes = typeof req.query.type === 'string' ? req.query.type : '';
@@ -237,7 +263,21 @@ export const queryRouter = (graph: GraphService): Router => {
   });
 
   /** Build/refresh embeddings so semantic search can use real vectors. */
-  router.post('/embed', (_req, res) => {
+  router.post('/embed', embedLimiter, (req, res) => {
+    // Hosted demo: never load the ONNX/transformers stack on the public server.
+    // Semantic search still works via its lexical fallback.
+    if (process.env.WEB_DIST) {
+      res.status(403).json({ error: 'Embeddings are disabled in the hosted demo.' });
+      return;
+    }
+    const graph = resolveGraphOr(resolve, req, res);
+    if (!graph) return;
+    // Read-only (cloned) repos are served from a worker-built snapshot; building
+    // embeddings would mutate their tree and load the heavy ML stack on demand.
+    if (graph.readOnly) {
+      res.status(405).json({ error: 'This repo is read-only.' });
+      return;
+    }
     graph
       .buildEmbeddings()
       .then((result) => res.json(result))
@@ -246,6 +286,8 @@ export const queryRouter = (graph: GraphService): Router => {
 
   /** Dead-code candidates: nodes with no incoming dependency edge. */
   router.get('/orphans', (req, res) => {
+    const graph = resolveGraphOr(resolve, req, res);
+    if (!graph) return;
     const snapshot = graph.getSnapshot();
     if (!snapshot) {
       res.status(503).json({ error: 'Graph not indexed yet' });
@@ -257,7 +299,9 @@ export const queryRouter = (graph: GraphService): Router => {
   });
 
   /** All dependency cycles in the graph, each as an ordered list of node refs. */
-  router.get('/cycles', (_req, res) => {
+  router.get('/cycles', (req, res) => {
+    const graph = resolveGraphOr(resolve, req, res);
+    if (!graph) return;
     const snapshot = graph.getSnapshot();
     if (!snapshot) {
       res.status(503).json({ error: 'Graph not indexed yet' });

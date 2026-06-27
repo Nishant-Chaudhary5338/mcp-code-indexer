@@ -16,6 +16,7 @@ import {
   type NodeKnowledge,
 } from '@repo/code-graph-core';
 import { askClaude } from './claude-cli.js';
+import { askAnthropic } from './anthropic.js';
 import { summaryPrompt, chatPrompt } from './prompts.js';
 import { Semaphore } from './semaphore.js';
 
@@ -39,6 +40,15 @@ const emptyPatch = (): GraphPatch => ({
 
 export class GraphService {
   private readonly session: IndexerSession;
+  /** Index root on disk. For read-only repos this is the clone's working tree. */
+  private readonly root: string;
+  /**
+   * Read-only repos are hydrated from a pre-built snapshot (indexed once in a
+   * worker) and never mutate: reindex/reparse/enrich/embed are not driven for
+   * them. Reverse-queries, source reads, and chat all answer from the snapshot
+   * plus on-disk source, so the full demo works without a live ts-morph project.
+   */
+  readonly readOnly: boolean;
   private snapshot: GraphSnapshot | null = null;
   private readonly listeners = new Set<PatchListener>();
   /**
@@ -52,8 +62,25 @@ export class GraphService {
   /** Bounds the number of concurrent Claude CLI subprocesses. */
   private readonly llmSlots = new Semaphore(MAX_CONCURRENT_LLM);
 
-  constructor(root: string) {
+  constructor(root: string, opts: { snapshot?: GraphSnapshot } = {}) {
+    this.root = root;
     this.session = new IndexerSession(root);
+    this.readOnly = opts.snapshot != null;
+    if (opts.snapshot) {
+      this.snapshot = opts.snapshot;
+      this.session.hydrate(opts.snapshot);
+    }
+  }
+
+  /** The on-disk root used to read source — clone tree for read-only repos. */
+  private workspaceRoot(): string {
+    return this.readOnly ? this.root : this.session.getWorkspaceRoot();
+  }
+
+  /** Release references so an evicted repo's graph + ts-morph state can be GC'd. */
+  dispose(): void {
+    this.listeners.clear();
+    this.snapshot = null;
   }
 
   /**
@@ -104,7 +131,7 @@ export class GraphService {
     const rel = nodePath(node);
     if (!rel) return null;
 
-    const root = this.session.getWorkspaceRoot();
+    const root = this.workspaceRoot();
     const raw = readNodeSource(root, node);
 
     const MAX_LINES = 400;
@@ -210,13 +237,13 @@ export class GraphService {
     if (!this.snapshot) {
       return { query, usedEmbeddings: false, count: 0, results: [], hint: 'Graph not indexed yet.' };
     }
-    return semanticSearch(this.session.getWorkspaceRoot(), this.snapshot, query, opts);
+    return semanticSearch(this.workspaceRoot(), this.snapshot, query, opts);
   }
 
   async generateKnowledge(nodeId: string): Promise<GraphNode | null> {
     const node = this.getNode(nodeId);
     if (!node) return null;
-    const root = this.session.getWorkspaceRoot();
+    const root = this.workspaceRoot();
     const source = readNodeSource(root, node);
 
     const llm = source
@@ -238,7 +265,10 @@ export class GraphService {
     return node;
   }
 
-  async askCodebase(question: string): Promise<ChatResult> {
+  async askCodebase(
+    question: string,
+    opts: { apiKey?: string } = {},
+  ): Promise<ChatResult> {
     const snapshot = this.snapshot;
     if (!snapshot) return { answer: 'Graph not ready.', citations: [], usedLlm: false };
 
@@ -246,7 +276,7 @@ export class GraphService {
       .toLowerCase()
       .split(/\W+/)
       .filter((t) => t.length > 2);
-    const root = this.session.getWorkspaceRoot();
+    const root = this.workspaceRoot();
 
     const ranked = snapshot.nodes
       .filter((n) => RETRIEVABLE.has(n.type))
@@ -274,14 +304,15 @@ export class GraphService {
     }));
     const citations = ranked.map(({ node }) => node.id);
 
-    // Bound concurrent subprocesses: N parallel chat requests must not spawn N
-    // Claude CLIs at once.
-    const llm = await this.llmSlots.run(() =>
-      askClaude(chatPrompt(question, context), {
-        model: 'haiku',
-        timeoutMs: 90000,
-      }),
-    );
+    // A caller-supplied key (hosted demo) goes straight to the Anthropic API;
+    // otherwise fall back to the locally-authenticated CLI (dev), bounding
+    // concurrent subprocesses so N parallel chats can't spawn N CLIs at once.
+    const prompt = chatPrompt(question, context);
+    const llm = opts.apiKey
+      ? await askAnthropic(opts.apiKey, prompt)
+      : await this.llmSlots.run(() =>
+          askClaude(prompt, { model: 'haiku', timeoutMs: 90000 }),
+        );
     if (llm) return { answer: llm, citations, usedLlm: true };
 
     const fallback = ranked

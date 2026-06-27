@@ -5,10 +5,24 @@ import * as path from 'path';
 import { createIndexerApp } from './app.js';
 import { killAllClaudeChildren } from './claude-cli.js';
 
-const PORT = Number(process.env.INDEXER_PORT ?? 3002);
-// Bind to loopback only: this server exposes unauthenticated mutating + LLM
-// endpoints, so it must not be reachable off-host.
-const HOST = '127.0.0.1';
+// Render (and most PaaS) inject PORT; fall back to the local dev default.
+const PORT = Number(process.env.PORT ?? process.env.INDEXER_PORT ?? 3002);
+// Loopback for local dev (unauthenticated mutating + LLM endpoints stay
+// off-host); the hosted deploy (WEB_DIST set) binds publicly so the PaaS can
+// route to it. Reindex/embed are blocked for read-only repos and rate-limited,
+// and chat uses a per-request bring-your-own key — nothing server-side to leak.
+const HOST =
+  process.env.INDEXER_HOST ?? (process.env.WEB_DIST ? '0.0.0.0' : '127.0.0.1');
+// Curated public repos to pre-clone + index on boot so the demo's landing page
+// has instantly-explorable graphs. Comma-separated GitHub URLs; only loaded in
+// hosted mode (WEB_DIST set) to keep local dev boot fast.
+const SHOWCASE_REPOS = (
+  process.env.SHOWCASE_REPOS ??
+  'Nishant-Chaudhary5338/mcp-toolkit,pmndrs/zustand,colinhacks/zod'
+)
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Walk up from `start` to the repo root (the dir holding pnpm-workspace.yaml). */
@@ -69,6 +83,15 @@ server.listen(PORT, HOST, () => {
     .indexOnBoot()
     .then(() => {
       stopWatching = handle.startWatching();
+      // Hosted demo: warm a few curated public repos in the background so the
+      // landing page has ready-to-explore graphs without a cold clone.
+      if (process.env.WEB_DIST) {
+        // Pinned so they're never evicted out from under the landing page.
+        for (const url of SHOWCASE_REPOS) handle.registry.loadGithub(url, { pinned: true });
+        if (SHOWCASE_REPOS.length > 0) {
+          console.log(`   warming ${SHOWCASE_REPOS.length} showcase repos…`);
+        }
+      }
     })
     .catch((err) => {
       console.error('initial index failed:', err);

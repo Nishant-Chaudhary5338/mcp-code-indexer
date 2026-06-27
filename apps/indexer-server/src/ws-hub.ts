@@ -1,11 +1,12 @@
 import { WebSocketServer, WebSocket } from 'ws';
-import type { Server } from 'http';
+import type { Server, IncomingMessage } from 'http';
 import type { GraphPatch } from '@repo/code-graph-core';
-import type { GraphService } from './graph-service.js';
+import type { SessionRegistry } from './session-registry.js';
 
 type ServerMessage =
   | { kind: 'snapshot-ready'; nodeCount: number; edgeCount: number }
-  | { kind: 'patch'; patch: GraphPatch };
+  | { kind: 'patch'; patch: GraphPatch }
+  | { kind: 'repo-unavailable'; repoId: string | null };
 
 /** Heartbeat cadence; sockets that miss a round-trip are terminated. */
 const HEARTBEAT_MS = 30_000;
@@ -30,34 +31,57 @@ const sendRaw = (socket: TrackedSocket, payload: string): void => {
   socket.send(payload);
 };
 
+/** Read the `?repo=` id off the WS upgrade URL, or null when absent. */
+const parseRepoId = (url: string | undefined): string | null => {
+  if (!url) return null;
+  try {
+    return new URL(url, 'http://localhost').searchParams.get('repo');
+  } catch {
+    return null;
+  }
+};
+
 export interface WsHub {
   close(): void;
 }
 
+/**
+ * Live-graph WebSocket hub, multi-repo aware. Each socket picks its repo via
+ * `?repo=<id>` (defaulting to the registry's default repo), receives that repo's
+ * full snapshot on connect, then subscribes only to that repo's patches. Repos
+ * that aren't ready get a `repo-unavailable` message so the client can poll
+ * `/api/repos/:id` and reconnect once it's built.
+ */
 export const attachWsHub = (
   server: Server,
-  graph: GraphService,
-  // Path the WS endpoint listens on. Defaults to '/ws' for standalone use; a
-  // host app can mount it elsewhere (e.g. '/indexer/ws').
+  registry: SessionRegistry,
   path = '/ws',
 ): WsHub => {
   const wss = new WebSocketServer({ server, path });
 
-  wss.on('connection', (socket: TrackedSocket) => {
+  wss.on('connection', (socket: TrackedSocket, req: IncomingMessage) => {
     socket.isAlive = true;
     socket.on('pong', () => {
       socket.isAlive = true;
     });
     // An unhandled 'error' on a socket crashes the process — always handle it.
-    socket.on('error', () => {
-      socket.terminate();
-    });
-    socket.on('close', () => {
-      socket.isAlive = false;
-    });
+    socket.on('error', () => socket.terminate());
 
-    // Bring late joiners up to date: send the full current graph as an upsert
-    // patch so they aren't stuck on a stale/empty view until the next change.
+    const repoId = parseRepoId(req.url) ?? registry.defaultId();
+    const graph = repoId ? registry.resolveGraph(repoId) : null;
+
+    if (!graph) {
+      sendRaw(
+        socket,
+        JSON.stringify({ kind: 'repo-unavailable', repoId } satisfies ServerMessage),
+      );
+      // 1013 = "try again later"; close so the client reconnects once the repo is
+      // ready rather than holding an idle socket open indefinitely.
+      socket.close(1013, 'repo-unavailable');
+      return;
+    }
+
+    // Bring this socket up to date: full current graph as an upsert patch.
     const snapshot = graph.getSnapshot();
     if (snapshot) {
       sendRaw(
@@ -82,6 +106,15 @@ export const attachWsHub = (
         } satisfies ServerMessage),
       );
     }
+
+    // Per-socket subscription: only this repo's live patches reach this client.
+    const unsubscribe = graph.onPatch((patch) => {
+      sendRaw(socket, JSON.stringify({ kind: 'patch', patch } satisfies ServerMessage));
+    });
+    socket.on('close', () => {
+      socket.isAlive = false;
+      unsubscribe();
+    });
   });
 
   // Heartbeat: terminate sockets that didn't pong since the last sweep.
@@ -103,20 +136,11 @@ export const attachWsHub = (
   // Don't keep the event loop alive solely for the heartbeat.
   heartbeat.unref?.();
 
-  const unsubscribe = graph.onPatch((patch) => {
-    // Serialize the payload ONCE per broadcast, not once per client.
-    const payload = JSON.stringify({ kind: 'patch', patch } satisfies ServerMessage);
-    for (const client of wss.clients) {
-      sendRaw(client as TrackedSocket, payload);
-    }
-  });
-
   wss.on('close', () => clearInterval(heartbeat));
 
   return {
     close: () => {
       clearInterval(heartbeat);
-      unsubscribe();
       for (const client of wss.clients) {
         try {
           client.terminate();

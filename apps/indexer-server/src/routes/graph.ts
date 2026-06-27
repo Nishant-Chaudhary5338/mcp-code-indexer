@@ -6,7 +6,7 @@ import {
   NodeType,
   type ProjectionOptions,
 } from '@repo/code-graph-core';
-import type { GraphService } from '../graph-service.js';
+import { resolveGraphOr, type GraphResolver } from './resolve.js';
 
 /** The valid node-type values, for filtering the `?type=` query param. */
 const NODE_TYPES = new Set<string>(NodeType.options);
@@ -62,10 +62,12 @@ const parseProjectionOptions = (query: Record<string, unknown>): ProjectionOptio
   return opts;
 };
 
-export const graphRouter = (graph: GraphService): Router => {
+export const graphRouter = (resolve: GraphResolver): Router => {
   const router = Router();
 
   router.get('/graph', (req, res) => {
+    const graph = resolveGraphOr(resolve, req, res);
+    if (!graph) return;
     const snapshot = graph.getSnapshot();
     if (!snapshot) {
       res.status(503).json({ error: 'Graph not indexed yet' });
@@ -108,6 +110,8 @@ export const graphRouter = (graph: GraphService): Router => {
   });
 
   router.get('/node/:id', (req, res) => {
+    const graph = resolveGraphOr(resolve, req, res);
+    if (!graph) return;
     const node = graph.getNode(req.params.id);
     if (!node) {
       res.status(404).json({ error: `Node not found: ${req.params.id}` });
@@ -117,6 +121,8 @@ export const graphRouter = (graph: GraphService): Router => {
   });
 
   router.get('/node/:id/source', (req, res) => {
+    const graph = resolveGraphOr(resolve, req, res);
+    if (!graph) return;
     if (!graph.getSnapshot()) {
       res.status(503).json({ error: 'Graph not indexed yet' });
       return;

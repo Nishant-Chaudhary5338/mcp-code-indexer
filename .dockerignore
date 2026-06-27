@@ -1,0 +1,14 @@
+**/node_modules
+**/dist
+**/build
+**/.turbo
+**/*.tsbuildinfo
+.git
+.github
+.code-graph
+**/.code-graph
+tools/code-indexer/.proof-cache
+**/*.log
+.DS_Store
+**/.env
+**/*.local

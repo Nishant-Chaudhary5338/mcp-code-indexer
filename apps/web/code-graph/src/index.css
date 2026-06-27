@@ -124,6 +124,24 @@ button:not(:disabled):active {
 .animate-rise {
   animation: rise-in 0.25s cubic-bezier(0.22, 1, 0.36, 1);
 }
+@keyframes shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20%,
+  60% {
+    transform: translateX(-4px);
+  }
+  40%,
+  80% {
+    transform: translateX(4px);
+  }
+}
+/* A short "no" nudge for inline errors (reduced-motion guard neutralizes it). */
+.animate-shake {
+  animation: shake 0.3s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
 
 /* Atmosphere over the graph: faint ember core glow + a teal signal wash + edge
    vignette for depth (retuned from the old indigo). */

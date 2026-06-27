@@ -12,7 +12,15 @@ import {
   whoCalls,
   findReferences,
 } from '../lib/analysis';
-import { fetchGraph, postKnowledge } from '../api/client';
+import {
+  fetchGraph,
+  postKnowledge,
+  fetchRepos,
+  loadGithubRepo,
+  fetchRepoStatus,
+  setActiveRepo,
+  type RepoSummary,
+} from '../api/client';
 import { connectWs } from '../api/ws';
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
@@ -82,6 +90,11 @@ applyTheme(readTheme());
 export type QueryKind = 'renders' | 'calls' | 'references' | 'blast-radius';
 
 type GraphStore = {
+  /** Repos available to explore; null currentRepoId means show the picker. */
+  repos: RepoSummary[];
+  currentRepoId: string | null;
+  /** Teardown for the active repo's WS, so switching repos doesn't leak sockets. */
+  wsCleanup: (() => void) | null;
   snapshot: GraphSnapshot | null;
   index: GraphIndex | null;
   focusId: string | null;
@@ -108,6 +121,14 @@ type GraphStore = {
   lastUpdatedAt: number | null;
   fitSignal: number;
   load: () => Promise<void>;
+  /** Fetch the list of explorable repos (for the picker). */
+  loadRepos: () => Promise<void>;
+  /** Open a ready repo by id: point the API at it and load its graph. */
+  openRepo: (id: string) => Promise<void>;
+  /** Clone + index a public GitHub repo, polling until ready; returns its entry. */
+  submitGithubUrl: (url: string) => Promise<RepoSummary>;
+  /** Return to the picker, tearing down the current repo's live connection. */
+  leaveRepo: () => void;
   setColorMode: (mode: ColorMode) => void;
   setRenderMode: (mode: RenderMode) => void;
   setLayout: (layout: Layout) => void;
@@ -149,6 +170,9 @@ const queryResultIds = (
 };
 
 export const useGraphStore = create<GraphStore>((set, get) => ({
+  repos: [],
+  currentRepoId: null,
+  wsCleanup: null,
   snapshot: null,
   index: null,
   focusId: null,
@@ -261,13 +285,62 @@ export const useGraphStore = create<GraphStore>((set, get) => ({
         state: 'ready',
         cycleCount: findCycles(index.crossEdges).length,
       });
-      connectWs({ onPatch: get().applyPatch });
+      // Drop any prior repo's socket before opening this repo's live stream.
+      get().wsCleanup?.();
+      const wsCleanup = connectWs({ onPatch: get().applyPatch }, get().currentRepoId);
+      set({ wsCleanup });
     } catch (err) {
       set({
         state: 'error',
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  },
+
+  loadRepos: async () => {
+    try {
+      const { repos } = await fetchRepos();
+      set({ repos });
+    } catch {
+      /* picker still renders; a failed list just shows the URL form */
+    }
+  },
+
+  openRepo: async (id) => {
+    setActiveRepo(id);
+    set({ currentRepoId: id });
+    await get().load();
+  },
+
+  submitGithubUrl: async (url) => {
+    const { id } = await loadGithubRepo(url);
+    // Poll until the clone + index settles, surfacing status into the repo list.
+    for (;;) {
+      const summary = await fetchRepoStatus(id);
+      set((s) => {
+        const others = s.repos.filter((r) => r.id !== summary.id);
+        return { repos: [...others, summary] };
+      });
+      if (summary.status === 'ready' || summary.status === 'error') return summary;
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+  },
+
+  leaveRepo: () => {
+    get().wsCleanup?.();
+    setActiveRepo(null);
+    set({
+      wsCleanup: null,
+      currentRepoId: null,
+      state: 'idle',
+      snapshot: null,
+      index: null,
+      focusId: null,
+      selectedId: null,
+      impactSet: null,
+      highlightKind: null,
+    });
+    void get().loadRepos();
   },
 
   drillInto: (id) =>

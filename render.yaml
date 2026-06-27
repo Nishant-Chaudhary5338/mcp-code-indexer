@@ -1,0 +1,21 @@
+# Render blueprint for the Code Graph live demo.
+# Deploy: push to GitHub, then New + > Blueprint and point Render at this repo.
+# ts-morph indexing is memory-hungry — `standard` (2GB) is the comfortable floor;
+# on a smaller plan also set INDEX_WORKER_HEAP_MB to fit the instance.
+services:
+  - type: web
+    name: code-graph-demo
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: standard
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Comma-separated public GitHub repos pre-indexed on boot for the landing page.
+      - key: SHOWCASE_REPOS
+        value: Nishant-Chaudhary5338/mcp-toolkit,pmndrs/zustand,colinhacks/zod
+      # Worker heap cap (MB). Raise on bigger plans; lower to ~420 on 512MB.
+      - key: INDEX_WORKER_HEAP_MB
+        value: '1536'

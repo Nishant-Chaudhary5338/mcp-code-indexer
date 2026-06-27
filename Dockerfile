@@ -28,6 +28,8 @@ RUN corepack enable
 COPY --from=build /app ./
 # Serve the built web app from the same origin as the API + WS.
 ENV WEB_DIST=/app/apps/web/code-graph/dist
-# Render/Heroku inject PORT; the server reads it and binds 0.0.0.0 in hosted mode.
-EXPOSE 3002
+# Default listen port. Render/Heroku inject their own PORT (overrides this);
+# Hugging Face Spaces proxies a fixed port (7860), which this default matches.
+ENV PORT=7860
+EXPOSE 7860
 CMD ["pnpm", "--filter", "indexer-server", "start"]

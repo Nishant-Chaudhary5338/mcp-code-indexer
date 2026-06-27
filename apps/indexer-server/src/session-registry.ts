@@ -39,8 +39,12 @@ export interface RepoSummary {
   error: string | null;
 }
 
-/** Cap on simultaneous worker-process indexes (each can use ~1-4 GB). */
-const MAX_CONCURRENT_BUILDS = 2;
+/**
+ * Cap on simultaneous worker-process indexes. Each worker is a separate Node
+ * process, so on a small (512MB) instance set this to 1 via env so two workers
+ * can't together exceed the container's memory.
+ */
+const MAX_CONCURRENT_BUILDS = Number(process.env.MAX_CONCURRENT_BUILDS ?? 2);
 /** Cap on resident cloned github repos; least-recently-used are evicted. */
 const MAX_GITHUB_REPOS = 6;
 /** Wall-clock budget for one worker index before it's killed. */

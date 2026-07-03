@@ -1,8 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import ForceGraph3D, { type ForceGraphMethods } from 'react-force-graph-3d';
 import { forceX, forceY, forceZ } from 'd3-force-3d';
-import { Vector2, FogExp2, DirectionalLight } from 'three';
+import { FogExp2, DirectionalLight, Vector2 } from 'three';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+// `controlType` is a real runtime prop of the underlying 3d-force-graph
+// (trackball | orbit | fly) but is missing from react-force-graph-3d's typings.
+// Orbit keeps the horizon level (no disorienting barrel-roll) and supports
+// damping — a far smoother, more predictable camera than the default trackball.
+const ForceGraph3DTyped = ForceGraph3D as unknown as React.ForwardRefExoticComponent<
+  React.ComponentProps<typeof ForceGraph3D> & {
+    controlType?: 'trackball' | 'orbit' | 'fly';
+  }
+>;
 import type { GraphNode, NodeType } from '@repo/code-graph-core';
 import { hasMetrics } from '@repo/code-graph-core';
 import { visibleGraph, visibleDependencyGraph, type GraphIndex } from '../../lib/graph-model';
@@ -77,6 +87,11 @@ export const GraphCanvas = ({
   const [hoverId, setHoverId] = useState<string | null>(null);
   // Once the user moves the camera, stop auto-framing so we never fight them.
   const userMovedRef = useRef(false);
+  // True while the user is actively orbiting/panning/zooming the camera. During a
+  // drag, react-force-graph keeps firing onNodeHover as nodes sweep under the
+  // (stationary) cursor — each one recolors the whole graph via refresh(),
+  // producing the mid-drag stutter. We gate hover off for the duration.
+  const interactingRef = useRef(false);
   const fittedFocusRef = useRef<string | null>(null);
   const bloomRef = useRef<UnrealBloomPass | null>(null);
   const fxReadyRef = useRef(false);
@@ -146,30 +161,74 @@ export const GraphCanvas = ({
   const fitView = (): void => {
     const fg = fgRef.current;
     if (!fg) return;
-    // zoomToFit over-zooms on tiny sets — clamp to a comfortable distance.
     if (nodes.length <= 2) {
-      fg.cameraPosition({ x: 0, y: 0, z: 110 }, { x: 0, y: 0, z: 0 }, 800);
-    } else {
-      fg.zoomToFit(800, 80);
+      fg.cameraPosition({ x: 0, y: 0, z: 120 }, { x: 0, y: 0, z: 0 }, 800);
+      return;
     }
+    // Frame from node POSITIONS. The built-in zoomToFit also measures each node's
+    // three object, so the persistent label sprites (small views) would balloon
+    // the box and over-zoom. Compute the camera distance from the coordinate
+    // bbox: fit the larger of width/height to the viewport at the camera FOV.
+    const bbox = fg.getGraphBbox?.();
+    if (!bbox) {
+      fg.zoomToFit(800, 80);
+      return;
+    }
+    const cx = (bbox.x[0] + bbox.x[1]) / 2;
+    const cy = (bbox.y[0] + bbox.y[1]) / 2;
+    const cz = (bbox.z[0] + bbox.z[1]) / 2;
+    const spanY = bbox.y[1] - bbox.y[0];
+    const spanX = bbox.x[1] - bbox.x[0];
+    const aspect = size.width && size.height ? size.width / size.height : 1.6;
+    // vertical half-extent that must fit, accounting for the wider-than-tall canvas.
+    const halfExtent = Math.max(spanY, spanX / aspect, 30) / 2;
+    const fov = (fg.camera?.() as { fov?: number } | undefined)?.fov ?? 50;
+    const dist = halfExtent / Math.tan(((fov / 2) * Math.PI) / 180);
+    // 1.35 leaves comfortable breathing room without shrinking the graph to a dot.
+    fg.cameraPosition({ x: cx, y: cy, z: cz + dist * 1.35 + 20 }, { x: cx, y: cy, z: cz }, 800);
   };
 
-  // Detect manual camera interaction so auto-fit yields to the user.
+  // Detect manual camera interaction so auto-fit yields to the user AND so hover
+  // tracing can be suppressed for the duration of a drag (the stutter fix).
   useEffect(() => {
     let controls: { addEventListener?: (e: string, fn: () => void) => void; removeEventListener?: (e: string, fn: () => void) => void } | undefined;
     const onStart = (): void => {
       userMovedRef.current = true;
+      interactingRef.current = true;
+      // Clear any lingering hover so the graph paints undimmed while orbiting.
+      setHoverId((cur) => (cur === null ? cur : null));
+    };
+    const onEnd = (): void => {
+      interactingRef.current = false;
     };
     const attach = (): void => {
       controls = fgRef.current?.controls?.() as typeof controls;
-      if (controls?.addEventListener) controls.addEventListener('start', onStart);
-      else timer = setTimeout(attach, 200);
+      if (controls?.addEventListener) {
+        controls.addEventListener('start', onStart);
+        controls.addEventListener('end', onEnd);
+        // Smooth, weighted camera motion instead of the raw 1:1 (and slightly
+        // jittery) default. These props exist on OrbitControls; guarded so a
+        // different control type is a harmless no-op.
+        const c = controls as unknown as {
+          enableDamping?: boolean;
+          dampingFactor?: number;
+          rotateSpeed?: number;
+          zoomSpeed?: number;
+          panSpeed?: number;
+        };
+        c.enableDamping = true;
+        c.dampingFactor = 0.14;
+        c.rotateSpeed = 0.65;
+        c.zoomSpeed = 0.8;
+        c.panSpeed = 0.6;
+      } else timer = setTimeout(attach, 200);
     };
     let timer: ReturnType<typeof setTimeout> | undefined;
     attach();
     return () => {
       if (timer) clearTimeout(timer);
       controls?.removeEventListener?.('start', onStart);
+      controls?.removeEventListener?.('end', onEnd);
     };
   }, []);
 
@@ -285,8 +344,9 @@ export const GraphCanvas = ({
 
   return (
     <div ref={containerRef} className="h-full w-full">
-      <ForceGraph3D
+      <ForceGraph3DTyped
         ref={fgRef}
+        controlType="orbit"
         width={size.width}
         height={size.height}
         graphData={data}
@@ -296,7 +356,12 @@ export const GraphCanvas = ({
         nodeResolution={perf.nodeResolution}
         nodeOpacity={1}
         nodeColor={(n) => colorFor(n as ForceNode)}
-        nodeVal={(n) => sizeOf.get((n as ForceNode).id) ?? 3}
+        nodeVal={(n) => {
+          const node = n as ForceNode;
+          const base = sizeOf.get(node.id) ?? 3;
+          // Pop the hovered node so pointing at it feels responsive and clear.
+          return node.id === hoverId ? base * 1.4 : base;
+        }}
         nodeLabel={(n) => {
           const node = n as ForceNode;
           const mark = expandable.has(node.id) ? '  ↧ click to open' : '';
@@ -317,7 +382,13 @@ export const GraphCanvas = ({
         cooldownTicks={perf.cooldownTicks}
         cooldownTime={perf.cooldownTime}
         onEngineStop={handleEngineStop}
-        onNodeHover={(n) => setHoverId(n ? (n as ForceNode).id : null)}
+        onNodeHover={(n) => {
+          // Ignore hover churn while orbiting/zooming — nodes sweeping under a
+          // fixed cursor would otherwise recolor the whole graph every frame.
+          if (interactingRef.current) return;
+          const id = n ? (n as ForceNode).id : null;
+          setHoverId((cur) => (cur === id ? cur : id));
+        }}
         onNodeClick={(n) => {
           const node = n as ForceNode;
           if (expandable.has(node.id)) onDrill(node.id);

@@ -12,7 +12,15 @@ import {
   whoCalls,
   findReferences,
 } from '../lib/analysis';
-import { fetchGraph, postKnowledge } from '../api/client';
+import {
+  fetchGraph,
+  postKnowledge,
+  fetchRepos,
+  loadGithubRepo,
+  fetchRepoStatus,
+  setActiveRepo,
+  type RepoSummary,
+} from '../api/client';
 import { connectWs } from '../api/ws';
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
@@ -82,6 +90,17 @@ applyTheme(readTheme());
 export type QueryKind = 'renders' | 'calls' | 'references' | 'blast-radius';
 
 type GraphStore = {
+  /** Repos available to explore; null currentRepoId means show the picker. */
+  repos: RepoSummary[];
+  currentRepoId: string | null;
+  /**
+   * Have we decided the initial screen yet? Prevents a flash of the repo picker
+   * before {@link bootstrap} auto-enters the single local repo (the npm `ui`/
+   * `serve` flow always has exactly one). Null until decided.
+   */
+  bootstrapped: boolean;
+  /** Teardown for the active repo's WS, so switching repos doesn't leak sockets. */
+  wsCleanup: (() => void) | null;
   snapshot: GraphSnapshot | null;
   index: GraphIndex | null;
   focusId: string | null;
@@ -108,6 +127,20 @@ type GraphStore = {
   lastUpdatedAt: number | null;
   fitSignal: number;
   load: () => Promise<void>;
+  /**
+   * Decide the initial screen: fetch repos and, when there's a single local repo
+   * (the npm `ui`/`serve` case), open it directly — skipping the picker. Only a
+   * multi-repo host (the showcase demo) lands on the picker.
+   */
+  bootstrap: () => Promise<void>;
+  /** Fetch the list of explorable repos (for the picker). */
+  loadRepos: () => Promise<void>;
+  /** Open a ready repo by id: point the API at it and load its graph. */
+  openRepo: (id: string) => Promise<void>;
+  /** Clone + index a public GitHub repo, polling until ready; returns its entry. */
+  submitGithubUrl: (url: string) => Promise<RepoSummary>;
+  /** Return to the picker, tearing down the current repo's live connection. */
+  leaveRepo: () => void;
   setColorMode: (mode: ColorMode) => void;
   setRenderMode: (mode: RenderMode) => void;
   setLayout: (layout: Layout) => void;
@@ -149,6 +182,10 @@ const queryResultIds = (
 };
 
 export const useGraphStore = create<GraphStore>((set, get) => ({
+  repos: [],
+  currentRepoId: null,
+  bootstrapped: false,
+  wsCleanup: null,
   snapshot: null,
   index: null,
   focusId: null,
@@ -261,13 +298,79 @@ export const useGraphStore = create<GraphStore>((set, get) => ({
         state: 'ready',
         cycleCount: findCycles(index.crossEdges).length,
       });
-      connectWs({ onPatch: get().applyPatch });
+      // Drop any prior repo's socket before opening this repo's live stream.
+      get().wsCleanup?.();
+      const wsCleanup = connectWs({ onPatch: get().applyPatch }, get().currentRepoId);
+      set({ wsCleanup });
     } catch (err) {
       set({
         state: 'error',
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  },
+
+  bootstrap: async () => {
+    try {
+      const { repos, defaultId } = await fetchRepos();
+      set({ repos });
+      // Single local repo (npm `ui`/`serve`) → drop the user straight into it.
+      // A multi-repo host keeps the picker as its landing.
+      if (repos.length <= 1 && defaultId) {
+        await get().openRepo(defaultId);
+        return;
+      }
+    } catch {
+      /* fall through to the picker; its own retry/URL form still works */
+    } finally {
+      set({ bootstrapped: true });
+    }
+  },
+
+  loadRepos: async () => {
+    try {
+      const { repos } = await fetchRepos();
+      set({ repos });
+    } catch {
+      /* picker still renders; a failed list just shows the URL form */
+    }
+  },
+
+  openRepo: async (id) => {
+    setActiveRepo(id);
+    set({ currentRepoId: id });
+    await get().load();
+  },
+
+  submitGithubUrl: async (url) => {
+    const { id } = await loadGithubRepo(url);
+    // Poll until the clone + index settles, surfacing status into the repo list.
+    for (;;) {
+      const summary = await fetchRepoStatus(id);
+      set((s) => {
+        const others = s.repos.filter((r) => r.id !== summary.id);
+        return { repos: [...others, summary] };
+      });
+      if (summary.status === 'ready' || summary.status === 'error') return summary;
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+  },
+
+  leaveRepo: () => {
+    get().wsCleanup?.();
+    setActiveRepo(null);
+    set({
+      wsCleanup: null,
+      currentRepoId: null,
+      state: 'idle',
+      snapshot: null,
+      index: null,
+      focusId: null,
+      selectedId: null,
+      impactSet: null,
+      highlightKind: null,
+    });
+    void get().loadRepos();
   },
 
   drillInto: (id) =>

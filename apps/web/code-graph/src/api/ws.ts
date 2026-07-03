@@ -2,14 +2,21 @@ import { GraphPatch } from '@repo/code-graph-core';
 
 type ServerMessage =
   | { kind: 'snapshot-ready'; nodeCount: number; edgeCount: number }
-  | { kind: 'patch'; patch: unknown };
+  | { kind: 'patch'; patch: unknown }
+  | { kind: 'repo-unavailable'; repoId: string | null };
 
 export type WsHandlers = {
   onPatch: (patch: GraphPatch) => void;
 };
 
-export const connectWs = (handlers: WsHandlers): (() => void) => {
-  const url = `ws://${window.location.host}/ws`;
+export const connectWs = (
+  handlers: WsHandlers,
+  repoId?: string | null,
+): (() => void) => {
+  // Match the page protocol so an https deploy uses wss:// (mixed-content safe).
+  const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  const query = repoId ? `?repo=${encodeURIComponent(repoId)}` : '';
+  const url = `${scheme}://${window.location.host}/ws${query}`;
   const socket = new WebSocket(url);
 
   socket.addEventListener('open', () => {

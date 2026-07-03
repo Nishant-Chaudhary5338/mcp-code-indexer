@@ -1,4 +1,6 @@
 import { defineConfig } from 'tsup';
+import { cpSync, existsSync } from 'node:fs';
+import * as path from 'node:path';
 
 /**
  * Bundle the whole indexer (engine + MCP server + HTTP/WS server + core schemas)
@@ -30,6 +32,25 @@ export default defineConfig({
   clean: true,
   shims: true,
   banner: { js: '#!/usr/bin/env node' },
+  // Copy the prebuilt 3D web explorer into the bundle AFTER tsup finishes —
+  // `clean: true` wipes `dist/` at the start of each build, so the UI must land
+  // afterward. `serve.ts` serves it from `dist/web` (resolved via import.meta.url).
+  // The UI is built by the `code-graph` workspace package (a devDependency, so
+  // Turbo's `^build` builds it first); if its dist is missing we warn but don't
+  // fail — the package still works headlessly.
+  onSuccess: async () => {
+    const uiDist = path.resolve(__dirname, '../../apps/web/code-graph/dist');
+    const dest = path.resolve(__dirname, 'dist/web');
+    if (existsSync(path.join(uiDist, 'index.html'))) {
+      cpSync(uiDist, dest, { recursive: true });
+      console.log(`✓ bundled 3D web explorer → dist/web`);
+    } else {
+      console.warn(
+        `⚠ web UI not found at ${uiDist} — package will run headless.\n` +
+          `  Build it first: pnpm --filter code-graph build`,
+      );
+    }
+  },
   external: [
     'ts-morph',
     'typescript',

@@ -24,11 +24,24 @@ export const ChatPanel = ({
   const [question, setQuestion] = useState('');
   const [turns, setTurns] = useState<Turn[]>([]);
   const [loading, setLoading] = useState(false);
+  // Optional bring-your-own Anthropic key for real answers (else keyword match).
+  // Kept only in this browser; sent per-request and never stored server-side.
+  const [apiKey, setApiKey] = useState(
+    () => localStorage.getItem('cg-anthropic-key') ?? '',
+  );
+  const onApiKeyChange = (value: string): void => {
+    setApiKey(value);
+    try {
+      localStorage.setItem('cg-anthropic-key', value);
+    } catch {
+      /* best-effort */
+    }
+  };
 
   const run = async (q: string, turnIndex: number): Promise<void> => {
     setLoading(true);
     try {
-      const result = await postChat(q);
+      const result = await postChat(q, apiKey.trim() || undefined);
       setTurns((t) =>
         t.map((turn, i) =>
           i === turnIndex ? { ...turn, result, error: null } : turn,
@@ -76,7 +89,7 @@ export const ChatPanel = ({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="absolute bottom-5 right-5 flex items-center gap-2 rounded-full bg-accent/20 px-4 py-2 text-sm text-violet-100 ring-1 ring-accent/25 shadow-[var(--accent-glow)] backdrop-blur-xl hover:-translate-y-0.5 hover:bg-accent/30"
+        className="absolute bottom-5 right-5 flex items-center gap-2 rounded-full bg-accent/20 px-4 py-2 text-sm text-violet-100 ring-1 ring-accent/25 shadow-[var(--accent-glow)] backdrop-blur-xl transition-[transform,background-color] duration-150 ease-out hover:-translate-y-0.5 hover:bg-accent/30 active:translate-y-0 active:scale-95"
       >
         <MessageSquare className="h-4 w-4" />
         Ask the codebase
@@ -124,6 +137,17 @@ export const ChatPanel = ({
                 </button>
               ))}
             </div>
+            <input
+              value={apiKey}
+              onChange={(e) => onApiKeyChange(e.target.value)}
+              type="password"
+              aria-label="Anthropic API key (optional)"
+              placeholder="sk-ant-… (optional, for real answers)"
+              className="mt-4 w-full rounded-lg border border-line bg-content/5 px-2.5 py-1.5 text-xs text-content outline-none placeholder:text-faint focus:border-accent/40"
+            />
+            <p className="mt-1 text-[11px] text-faint">
+              Bring your own key — used per request, never stored on the server.
+            </p>
           </div>
         )}
         {turns.map((turn, i) => (
@@ -134,6 +158,8 @@ export const ChatPanel = ({
                 result={turn.result}
                 onCite={onCite}
                 resolveCitation={resolveCitation}
+                apiKey={apiKey}
+                onApiKeyChange={onApiKeyChange}
               />
             ) : turn.error ? (
               <div className="flex items-start gap-2 rounded-lg bg-rose-500/10 p-2.5 text-xs text-(--status-error) ring-1 ring-rose-400/20">
@@ -190,10 +216,14 @@ const ChatAnswer = ({
   result,
   onCite,
   resolveCitation,
+  apiKey,
+  onApiKeyChange,
 }: {
   result: ChatResult;
   onCite: (id: string) => void;
   resolveCitation: (id: string) => CitationInfo | null;
+  apiKey: string;
+  onApiKeyChange: (value: string) => void;
 }): React.ReactElement => (
   <div className="rounded-lg bg-surface p-3">
     <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted">
@@ -227,7 +257,26 @@ const ChatAnswer = ({
       </div>
     )}
     {!result.usedLlm && (
-      <p className="mt-1.5 text-[11px] text-muted">keyword match (no LLM)</p>
+      // Heuristic keyword match — no LLM answered. Tell the user exactly how to
+      // upgrade, and surface an inline key input if they haven't set one yet
+      // (the empty-state field is gone once a conversation is underway).
+      <div className="mt-2 border-t border-line pt-2">
+        <p className="text-[11px] text-muted">
+          Heuristic match — for real answers, install the{' '}
+          <span className="font-medium text-content">Claude CLI</span> or add an
+          Anthropic API key.
+        </p>
+        {!apiKey && (
+          <input
+            value={apiKey}
+            onChange={(e) => onApiKeyChange(e.target.value)}
+            type="password"
+            aria-label="Anthropic API key (optional)"
+            placeholder="sk-ant-… (used per request, never stored server-side)"
+            className="mt-1.5 w-full rounded-lg border border-line bg-content/5 px-2.5 py-1.5 text-[11px] text-content outline-none placeholder:text-faint focus:border-accent/40"
+          />
+        )}
+      </div>
     )}
   </div>
 );

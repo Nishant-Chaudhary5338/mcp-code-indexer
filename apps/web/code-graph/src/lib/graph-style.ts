@@ -10,8 +10,11 @@ export const TYPE_COLOR: Record<NodeType, string> = {
   repo: '#F2F3F5', // bright neutral — the root
   app: '#5B9DFF', // info blue — an application surface
   package: '#46D88A', // ok green — a unit that builds
-  folder: '#555A63', // dark slate — structural container, recedes into the bg
-  file: '#B0B6BE', // light grey — the default grain (kept well clear of folder)
+  // Structure types share a cool steel-cyan family — colorful and calm (never
+  // dead grey), so warm component/function nodes still read as the stars. Folder
+  // is the deeper container; file is the lighter, most-numerous grain.
+  folder: '#4E7A8F', // deep steel-teal — a container
+  file: '#8FC2D6', // soft steel-cyan — the grain (lighter than folder)
   component: '#FF6A2B', // EMBER — the star
   function: '#C792EA', // violet — behaviour / logic
   external: '#C2A878', // warm tan — a third-party (node_modules) package
@@ -25,8 +28,8 @@ export const TYPE_COLOR_LIGHT: Record<NodeType, string> = {
   repo: '#0F172A', // ink — the root
   app: '#2563EB', // blue-600
   package: '#15803D', // green-700
-  folder: '#334155', // slate-700 — dark structural container
-  file: '#7C8698', // slate — the grain (lighter than folder, still reads on white)
+  folder: '#3F6579', // deep steel-teal — container (matches the dark identity)
+  file: '#5091A8', // steel-cyan — the grain, distinct from app-blue, reads on white
   component: '#E8551A', // deepened ember (matches the light --color-accent)
   function: '#7C3AED', // violet-600
   external: '#8A6D3B', // bronze — third-party package, distinct from the cool ramp
@@ -149,8 +152,14 @@ export const perfTierFor = (nodeCount: number, linkCount: number): PerfTier => {
   const huge = nodeCount > 1500 || linkCount > 4000;
   return {
     curveLinks: !heavy,
-    ambientParticles: !heavy,
-    nodeResolution: huge ? 6 : heavy ? 10 : 18,
+    // Ambient particles animate a mesh on EVERY link every frame — the single
+    // biggest reason the canvas never idles. Reserve them for genuinely small
+    // views (where the cost is negligible and the sparkle reads as intentional);
+    // everywhere else, particles appear only on the hovered/traced links.
+    ambientParticles: !heavy && linkCount <= 60,
+    // 18 segments is imperceptibly rounder than 14 at node scale but ~40% more
+    // geometry per sphere; 14 keeps them smooth while lightening every frame.
+    nodeResolution: huge ? 6 : heavy ? 10 : 14,
     bloom: !heavy,
     cooldownTicks: huge ? 100 : heavy ? 160 : 240,
     cooldownTime: huge ? 4000 : heavy ? 8000 : 15000,

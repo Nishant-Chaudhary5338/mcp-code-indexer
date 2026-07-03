@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Boxes, RefreshCw, Loader2, Search, FolderOpen } from 'lucide-react';
+import { Boxes, RefreshCw, Loader2, Search, FolderOpen, ChevronLeft } from 'lucide-react';
 import { useGraphStore } from './store/graphStore';
 import { pathToRoot } from './lib/graph-model';
 import { blastRadius, whoRenders, whoCalls, findReferences } from './lib/analysis';
@@ -13,6 +13,7 @@ import { LiveStatus } from './components/Toolbar/LiveStatus';
 import { ChatPanel } from './components/Chat/ChatPanel';
 import { CommandPalette } from './components/CommandPalette/CommandPalette';
 import { OnboardingHint } from './components/Onboarding/OnboardingHint';
+import { RepoPicker } from './components/RepoPicker/RepoPicker';
 
 export const App = (): React.ReactElement => {
   const {
@@ -45,13 +46,20 @@ export const App = (): React.ReactElement => {
     fitSignal,
     recenter,
     goHome,
+    currentRepoId,
+    leaveRepo,
+    repos,
+    bootstrapped,
+    bootstrap,
   } = useGraphStore();
 
   const [paletteOpen, setPaletteOpen] = useState(false);
 
+  // Decide the first screen once: the single-repo npm flow skips the picker and
+  // lands directly in the graph.
   useEffect(() => {
-    void load();
-  }, [load]);
+    void bootstrap();
+  }, [bootstrap]);
 
   // ⌘K / Ctrl-K opens the node search (and the keyboard path into the graph).
   useEffect(() => {
@@ -64,6 +72,26 @@ export const App = (): React.ReactElement => {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  // Still deciding the first screen — hold a loader so the picker never flashes
+  // before we auto-enter the single local repo.
+  if (!currentRepoId && !bootstrapped) {
+    return (
+      <Centered>
+        <Loader2 className="h-6 w-6 animate-spin text-accent" />
+        <p className="mt-3 text-sm text-muted">Loading your codebase…</p>
+      </Centered>
+    );
+  }
+  // Decided, and no repo to auto-open → the picker (multi-repo host, or after the
+  // user explicitly left a repo).
+  if (!currentRepoId) {
+    return <RepoPicker />;
+  }
+
+  // The npm single-repo flow has nowhere to go "back" to — the wordmark reframes
+  // to the repo root instead of exposing an empty one-card picker.
+  const isSingleRepo = repos.length <= 1;
 
   if (state === 'loading' || state === 'idle') {
     return (
@@ -139,13 +167,20 @@ export const App = (): React.ReactElement => {
     <div className="flex h-full flex-col">
       <header className="flex items-center justify-between border-b border-line bg-surface px-5 py-3 backdrop-blur-xl">
         <div className="flex min-w-0 items-center gap-3">
-          {/* Wordmark lockup — gives the tool an identity, not just an icon. */}
-          <span className="flex shrink-0 items-center gap-2">
+          {/* Multi-repo host: back to the picker. Single local repo: the wordmark
+              reframes to the repo root (no picker to return to). */}
+          <button
+            type="button"
+            onClick={isSingleRepo ? goHome : leaveRepo}
+            aria-label={isSingleRepo ? 'Back to repository root' : 'Back to repositories'}
+            className="flex shrink-0 items-center gap-1 rounded-lg px-1.5 py-1 text-muted transition-[transform,background-color,color] duration-150 ease-out hover:bg-content/10 hover:text-content active:scale-95"
+          >
+            {!isSingleRepo && <ChevronLeft className="h-4 w-4" />}
             <Boxes className="h-5 w-5 text-accent" />
             <span className="hidden text-sm font-semibold tracking-tight text-content sm:inline">
               Code Graph
             </span>
-          </span>
+          </button>
           <span className="h-4 w-px shrink-0 bg-content/10" aria-hidden="true" />
           <Breadcrumbs path={breadcrumbPath} onNavigate={drillTo} />
         </div>

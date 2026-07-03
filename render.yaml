@@ -1,0 +1,27 @@
+# Render blueprint for the Code Graph live demo — tuned for the FREE tier (512MB).
+# Deploy: push to GitHub, then New + > Blueprint and point Render at this repo.
+#
+# The free plan sleeps after 15 min idle (~50s cold start). Keep it warm for $0
+# with a free uptime pinger (e.g. UptimeRobot) hitting <url>/health every 5 min.
+# Free has 512MB RAM, so indexing runs one repo at a time with a small heap.
+services:
+  - type: web
+    name: code-graph-demo
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Comma-separated public GitHub repos pre-indexed on boot for the landing page.
+      # Kept small so they index comfortably within 512MB.
+      - key: SHOWCASE_REPOS
+        value: Nishant-Chaudhary5338/mcp-toolkit,pmndrs/zustand,colinhacks/zod
+      # Index worker heap cap (MB) — sized to fit the 512MB free instance.
+      - key: INDEX_WORKER_HEAP_MB
+        value: '420'
+      # One worker at a time so two indexes can't together exceed 512MB.
+      - key: MAX_CONCURRENT_BUILDS
+        value: '1'

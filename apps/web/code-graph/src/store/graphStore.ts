@@ -93,6 +93,12 @@ type GraphStore = {
   /** Repos available to explore; null currentRepoId means show the picker. */
   repos: RepoSummary[];
   currentRepoId: string | null;
+  /**
+   * Have we decided the initial screen yet? Prevents a flash of the repo picker
+   * before {@link bootstrap} auto-enters the single local repo (the npm `ui`/
+   * `serve` flow always has exactly one). Null until decided.
+   */
+  bootstrapped: boolean;
   /** Teardown for the active repo's WS, so switching repos doesn't leak sockets. */
   wsCleanup: (() => void) | null;
   snapshot: GraphSnapshot | null;
@@ -121,6 +127,12 @@ type GraphStore = {
   lastUpdatedAt: number | null;
   fitSignal: number;
   load: () => Promise<void>;
+  /**
+   * Decide the initial screen: fetch repos and, when there's a single local repo
+   * (the npm `ui`/`serve` case), open it directly — skipping the picker. Only a
+   * multi-repo host (the showcase demo) lands on the picker.
+   */
+  bootstrap: () => Promise<void>;
   /** Fetch the list of explorable repos (for the picker). */
   loadRepos: () => Promise<void>;
   /** Open a ready repo by id: point the API at it and load its graph. */
@@ -172,6 +184,7 @@ const queryResultIds = (
 export const useGraphStore = create<GraphStore>((set, get) => ({
   repos: [],
   currentRepoId: null,
+  bootstrapped: false,
   wsCleanup: null,
   snapshot: null,
   index: null,
@@ -294,6 +307,23 @@ export const useGraphStore = create<GraphStore>((set, get) => ({
         state: 'error',
         error: err instanceof Error ? err.message : String(err),
       });
+    }
+  },
+
+  bootstrap: async () => {
+    try {
+      const { repos, defaultId } = await fetchRepos();
+      set({ repos });
+      // Single local repo (npm `ui`/`serve`) → drop the user straight into it.
+      // A multi-repo host keeps the picker as its landing.
+      if (repos.length <= 1 && defaultId) {
+        await get().openRepo(defaultId);
+        return;
+      }
+    } catch {
+      /* fall through to the picker; its own retry/URL form still works */
+    } finally {
+      set({ bootstrapped: true });
     }
   },
 

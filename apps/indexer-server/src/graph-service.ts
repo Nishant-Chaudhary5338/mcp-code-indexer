@@ -318,15 +318,25 @@ export class GraphService {
     }));
     const citations = ranked.map(({ node }) => node.id);
 
-    // A caller-supplied key (hosted demo) goes straight to the Anthropic API;
-    // otherwise fall back to the locally-authenticated CLI (dev), bounding
-    // concurrent subprocesses so N parallel chats can't spawn N CLIs at once.
+    // LLM cascade, most-specific first:
+    //  1. a caller-supplied key (hosted demo / in-UI key field) → Anthropic API
+    //  2. the locally-authenticated Claude CLI (zero-config dev), concurrency-
+    //     bounded so N parallel chats can't spawn N CLIs at once
+    //  3. a server-side ANTHROPIC_API_KEY env → Anthropic API (headless / CI where
+    //     the CLI isn't installed but a key is available)
+    // If all miss, we fall through to the lexical closest-matches list below.
     const prompt = chatPrompt(question, context);
-    const llm = opts.apiKey
-      ? await askAnthropic(opts.apiKey, prompt)
-      : await this.llmSlots.run(() =>
-          askClaude(prompt, { model: 'haiku', timeoutMs: 90000 }),
-        );
+    let llm: string | null = null;
+    if (opts.apiKey) {
+      llm = await askAnthropic(opts.apiKey, prompt);
+    } else {
+      llm = await this.llmSlots.run(() =>
+        askClaude(prompt, { model: 'haiku', timeoutMs: 90000 }),
+      );
+      if (!llm && process.env.ANTHROPIC_API_KEY) {
+        llm = await askAnthropic(process.env.ANTHROPIC_API_KEY, prompt);
+      }
+    }
     if (llm) return { answer: llm, citations, usedLlm: true };
 
     const fallback = ranked

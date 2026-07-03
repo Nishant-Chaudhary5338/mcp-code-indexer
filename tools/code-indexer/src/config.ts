@@ -1,8 +1,30 @@
+import { existsSync, statSync } from 'node:fs';
+
 export type IndexerConfig = {
   root: string;
   includeGlobs: string[];
   excludeDirs: string[];
   maxFilesPerPackage: number;
+};
+
+/**
+ * Validate that `root` points at a real directory before any indexing work, so a
+ * mistyped path (the most common agent/CLI error) yields a clear, actionable
+ * message instead of a raw ts-morph/fs stack trace deep in the engine.
+ */
+export const validateRoot = (root: string): void => {
+  if (!existsSync(root)) {
+    throw new Error(
+      `Root path does not exist: ${root}\n` +
+        `  Pass an existing repo directory with --root, e.g. --root .`,
+    );
+  }
+  if (!statSync(root).isDirectory()) {
+    throw new Error(
+      `Root path is not a directory: ${root}\n` +
+        `  --root must point at a repo folder, not a file.`,
+    );
+  }
 };
 
 export const DEFAULT_EXCLUDE_DIRS: string[] = [
@@ -25,10 +47,13 @@ export const isSourceFile = (filePath: string): boolean =>
 export const createConfig = (
   root: string,
   overrides: Partial<IndexerConfig> = {},
-): IndexerConfig => ({
-  root,
-  includeGlobs: ['src/**/*.{ts,tsx}', 'components/**/*.{ts,tsx}'],
-  excludeDirs: DEFAULT_EXCLUDE_DIRS,
-  maxFilesPerPackage: 1500,
-  ...overrides,
-});
+): IndexerConfig => {
+  validateRoot(root);
+  return {
+    root,
+    includeGlobs: ['src/**/*.{ts,tsx}', 'components/**/*.{ts,tsx}'],
+    excludeDirs: DEFAULT_EXCLUDE_DIRS,
+    maxFilesPerPackage: 1500,
+    ...overrides,
+  };
+};

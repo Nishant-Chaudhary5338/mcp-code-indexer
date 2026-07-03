@@ -13,6 +13,7 @@ const command = argv[0];
 const USAGE = `code-graph-indexer — index any TypeScript/React repo into a queryable code graph
 
 Usage:
+  code-graph-indexer ui    [--root <path>] [--port <n>]  index a repo + open the 3D web explorer + chatbot (start here)
   code-graph-indexer mcp                                 run as an MCP server over stdio (for Claude Desktop, Cursor, Glama)
   code-graph-indexer serve [--root <path>] [--port <n>]  run the HTTP/WS server + web UI
   code-graph-indexer index [--root <path>] [--incremental]
@@ -48,7 +49,9 @@ if (
   process.exit(result.status ?? 0);
 }
 
-if (command === 'serve') {
+// `ui` and `serve` are the same server; `ui` is the friendly, discoverable name
+// that points a newcomer straight at the 3D explorer. Both serve the bundled UI.
+if (command === 'serve' || command === 'ui') {
   void startServer(argv.slice(1));
 } else if (command === 'mcp') {
   new CodeIndexerServer().run().catch((err) => {

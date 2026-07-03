@@ -75,7 +75,16 @@ export interface IndexerAppHandle {
  * The HTTP port is read from the environment purely for the informational
  * `/health` payload — the factory itself never binds a port.
  */
-export function createIndexerApp(opts: { root: string; label?: string }): IndexerAppHandle {
+export function createIndexerApp(opts: {
+  root: string;
+  label?: string;
+  /**
+   * Absolute path to a built web app to serve same-origin. Overrides the
+   * `WEB_DIST` env var (which the hosted deploy still uses). The npm package
+   * passes its bundled `dist/web` here, resolved from `import.meta.url`.
+   */
+  webDist?: string;
+}): IndexerAppHandle {
   const { root } = opts;
   const graph = new GraphService(root);
   const registry = new SessionRegistry();
@@ -99,8 +108,9 @@ export function createIndexerApp(opts: { root: string; label?: string }): Indexe
   // Port the standalone server binds, surfaced via /health for parity with the
   // pre-refactor server. Read from env only — the factory never binds it.
   const PORT = Number(process.env.INDEXER_PORT ?? 3002);
-  // Path to the built web app to serve (production single-origin deploy).
-  const webDist = process.env.WEB_DIST;
+  // Path to the built web app to serve same-origin. Explicit option wins (the
+  // npm package's bundled UI); the WEB_DIST env is the hosted-deploy fallback.
+  const webDist = opts.webDist ?? process.env.WEB_DIST;
 
   // Tracks whether the live-edit watcher is up, surfaced via /health and /.
   let watcherReady = false;

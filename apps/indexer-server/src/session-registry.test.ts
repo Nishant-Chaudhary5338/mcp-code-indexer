@@ -3,27 +3,6 @@ import assert from 'node:assert/strict';
 import { SessionRegistry } from './session-registry.js';
 import type { RepoEntry, RepoSummary } from './session-registry.js';
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Build a minimal RepoEntry without touching any real filesystem or workers. */
-const makeEntry = (
-  overrides: Partial<RepoEntry> & { id: string; label: string },
-): RepoEntry => ({
-  origin: 'github',
-  status: 'ready',
-  graph: null,
-  dir: null,
-  nodeCount: null,
-  edgeCount: null,
-  error: null,
-  lastAccess: Date.now(),
-  building: null,
-  pinned: false,
-  ...overrides,
-});
-
 // RepoSummary projected fields (must match toSummary in session-registry.ts)
 const SUMMARY_FIELDS: Array<keyof RepoSummary> = [
   'id',

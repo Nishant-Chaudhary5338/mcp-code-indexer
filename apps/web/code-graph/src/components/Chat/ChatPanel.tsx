@@ -158,6 +158,8 @@ export const ChatPanel = ({
                 result={turn.result}
                 onCite={onCite}
                 resolveCitation={resolveCitation}
+                apiKey={apiKey}
+                onApiKeyChange={onApiKeyChange}
               />
             ) : turn.error ? (
               <div className="flex items-start gap-2 rounded-lg bg-rose-500/10 p-2.5 text-xs text-(--status-error) ring-1 ring-rose-400/20">
@@ -214,10 +216,14 @@ const ChatAnswer = ({
   result,
   onCite,
   resolveCitation,
+  apiKey,
+  onApiKeyChange,
 }: {
   result: ChatResult;
   onCite: (id: string) => void;
   resolveCitation: (id: string) => CitationInfo | null;
+  apiKey: string;
+  onApiKeyChange: (value: string) => void;
 }): React.ReactElement => (
   <div className="rounded-lg bg-surface p-3">
     <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted">
@@ -251,7 +257,26 @@ const ChatAnswer = ({
       </div>
     )}
     {!result.usedLlm && (
-      <p className="mt-1.5 text-[11px] text-muted">keyword match (no LLM)</p>
+      // Heuristic keyword match — no LLM answered. Tell the user exactly how to
+      // upgrade, and surface an inline key input if they haven't set one yet
+      // (the empty-state field is gone once a conversation is underway).
+      <div className="mt-2 border-t border-line pt-2">
+        <p className="text-[11px] text-muted">
+          Heuristic match — for real answers, install the{' '}
+          <span className="font-medium text-content">Claude CLI</span> or add an
+          Anthropic API key.
+        </p>
+        {!apiKey && (
+          <input
+            value={apiKey}
+            onChange={(e) => onApiKeyChange(e.target.value)}
+            type="password"
+            aria-label="Anthropic API key (optional)"
+            placeholder="sk-ant-… (used per request, never stored server-side)"
+            className="mt-1.5 w-full rounded-lg border border-line bg-content/5 px-2.5 py-1.5 text-[11px] text-content outline-none placeholder:text-faint focus:border-accent/40"
+          />
+        )}
+      </div>
     )}
   </div>
 );

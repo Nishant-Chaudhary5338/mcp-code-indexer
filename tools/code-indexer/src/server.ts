@@ -1,4 +1,7 @@
 import * as path from 'path';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
 import { McpServerBase } from '../../_shared/index.js';
 import type { ToolResult } from '../../_shared/index.js';
 import { createConfig } from './config.js';
@@ -27,6 +30,7 @@ type RefArgs = { root?: string; id?: string; types?: string[] };
 type SearchArgs = { root?: string; query?: string; type?: string[]; limit?: number };
 type ContextArgs = { root?: string; id?: string; maxRefs?: number };
 type SemanticArgs = { root?: string; query?: string; type?: string[]; limit?: number };
+type OpenExplorerArgs = { root?: string; port?: number };
 type GraphArgs = {
   root?: string;
   summary?: boolean;
@@ -207,6 +211,19 @@ export class CodeIndexerServer extends McpServerBase {
       },
       this.handleSemanticSearch.bind(this),
     );
+
+    this.addTool(
+      'open_explorer',
+      'Start the local 3D web explorer + chatbot for a repo and return its URL. Use when the user asks to SEE/visualize the code graph, open the UI, or explore visually. Starts a background HTTP server on 127.0.0.1 (default port 3002) and indexes the repo; returns the URL to open in a browser.',
+      {
+        type: 'object',
+        properties: {
+          ...rootProp,
+          port: { type: 'number', description: 'Port to serve on (default 3002; auto-mentions the next port if taken)' },
+        },
+      },
+      this.handleOpenExplorer.bind(this),
+    );
   }
 
   private async handleIndexRepo(args: unknown): Promise<ToolResult> {
@@ -352,6 +369,74 @@ export class CodeIndexerServer extends McpServerBase {
           type: type as NodeType[] | undefined,
           limit,
         })),
+      });
+    } catch (err) {
+      return this.error(err);
+    }
+  }
+
+  /**
+   * Poll `GET /health` on the given URL until it answers or the deadline passes.
+   * The server calls `listen` before it finishes indexing, so health responds
+   * within a second or two even on large repos — we return as soon as it's up.
+   */
+  private async waitForHealth(url: string, timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      try {
+        const controller = new AbortController();
+        const t = setTimeout(() => controller.abort(), 1000);
+        const res = await fetch(`${url}/health`, { signal: controller.signal });
+        clearTimeout(t);
+        if (res.ok) return true;
+      } catch {
+        // Not up yet — wait a beat and retry.
+      }
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    return false;
+  }
+
+  private async handleOpenExplorer(args: unknown): Promise<ToolResult> {
+    try {
+      const { root, port } = args as OpenExplorerArgs;
+      const resolvedRoot = resolveRoot(root);
+      const resolvedPort = port ?? Number(process.env.INDEXER_PORT ?? 3002);
+      const url = `http://127.0.0.1:${resolvedPort}`;
+
+      // The runnable CLI entry sits beside this module in the published bundle
+      // (dist/cli.js next to dist/mcp.js). Resolve it from import.meta.url so the
+      // path is correct wherever the package is installed. In a source-tree run
+      // the sibling won't exist — degrade to an actionable instruction.
+      const cliEntry = fileURLToPath(new URL('./cli.js', import.meta.url));
+      if (!existsSync(cliEntry)) {
+        return this.success({
+          started: false,
+          url,
+          message:
+            'Could not locate the bundled server entry. Start the explorer manually:\n' +
+            `  npx code-graph-indexer ui --root "${resolvedRoot}" --port ${resolvedPort}`,
+        });
+      }
+
+      // Detached + unref'd so the explorer outlives this MCP tool call (and the
+      // agent turn). stdio ignored — the returned URL is the whole contract.
+      const child = spawn(
+        process.execPath,
+        [cliEntry, 'serve', '--root', resolvedRoot, '--port', String(resolvedPort)],
+        { detached: true, stdio: 'ignore' },
+      );
+      child.unref();
+
+      const up = await this.waitForHealth(url, 15_000);
+      return this.success({
+        started: true,
+        url,
+        root: resolvedRoot,
+        ready: up,
+        message: up
+          ? `3D code explorer is live at ${url} — open it in a browser.`
+          : `Starting the explorer at ${url}. It may still be indexing; open it in a browser in a few seconds. If nothing loads, port ${resolvedPort} may be in use — retry with a different port.`,
       });
     } catch (err) {
       return this.error(err);

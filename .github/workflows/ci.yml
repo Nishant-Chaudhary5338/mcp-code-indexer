@@ -19,6 +19,10 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+      # npm audit reports nothing on a pnpm workspace (no package-lock.json to
+      # read), so audit explicitly or advisories accumulate unnoticed.
+      - name: Audit dependencies
+        run: pnpm audit --audit-level high
       - run: pnpm build
       - run: pnpm typecheck
       - run: pnpm lint

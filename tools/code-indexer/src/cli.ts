@@ -90,7 +90,7 @@ const runEmbedCommand = async (root: string): Promise<void> => {
   });
   if (!res.available) {
     console.error(
-      'Embedding model unavailable (optional dep @xenova/transformers not installed, ' +
+      'Embedding model unavailable (optional dep @huggingface/transformers not installed, ' +
         'or model could not be fetched). Semantic search will fall back to lexical.',
     );
     process.exit(1);

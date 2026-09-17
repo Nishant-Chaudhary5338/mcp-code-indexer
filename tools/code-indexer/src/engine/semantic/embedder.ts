@@ -1,5 +1,5 @@
 /**
- * Optional local embedder. Wraps transformers.js (all-MiniLM-L6-v2, 384-dim) and
+ * Optional local embedder. Wraps Transformers.js (all-MiniLM-L6-v2, 384-dim) and
  * is loaded **lazily and defensively**: if the package or its native runtime
  * isn't installed, or the model can't be fetched offline, every entry point
  * resolves to `null` and the caller falls back to lexical search. Nothing here is
@@ -22,16 +22,30 @@ type Extractor = (
 
 let extractorPromise: Promise<Extractor | null> | null = null;
 
+type TransformersModule = {
+  pipeline: (task: string, model: string) => Promise<Extractor>;
+  env?: { allowLocalModels?: boolean };
+};
+
+// `@xenova/transformers` is the abandoned predecessor of
+// `@huggingface/transformers` and its onnxruntime pulls in a protobufjs with a
+// known RCE. We ask for the maintained package first and only fall back to the
+// old one so an existing install keeps working rather than silently losing
+// semantic search.
+const CANDIDATES = ['@huggingface/transformers', '@xenova/transformers'] as const;
+
 const loadExtractor = async (): Promise<Extractor | null> => {
-  try {
-    const mod = (await import('@xenova/transformers')) as {
-      pipeline: (task: string, model: string) => Promise<Extractor>;
-      env?: { allowLocalModels?: boolean };
-    };
-    return await mod.pipeline('feature-extraction', EMBED_MODEL);
-  } catch {
-    return null; // package missing, native runtime missing, or model unavailable
+  for (const pkg of CANDIDATES) {
+    try {
+      const mod = (await import(/* @vite-ignore */ pkg)) as TransformersModule;
+      return await mod.pipeline('feature-extraction', EMBED_MODEL);
+    } catch {
+      // Not installed, native runtime missing, or the model can't be fetched —
+      // try the next candidate, then give up and let the caller fall back to
+      // lexical search.
+    }
   }
+  return null;
 };
 
 /** Whether the embedder loaded — resolves the model once and caches the result. */

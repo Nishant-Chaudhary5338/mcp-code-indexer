@@ -62,6 +62,7 @@ export default defineConfig({
     // Optional local-embeddings dep (semantic search). Lazy-imported at runtime
     // and ships native onnxruntime/sharp prebuilds — must never be inlined; it's
     // an optionalDependency so absence degrades gracefully to lexical search.
+    '@huggingface/transformers',
     '@xenova/transformers',
   ],
   noExternal: [

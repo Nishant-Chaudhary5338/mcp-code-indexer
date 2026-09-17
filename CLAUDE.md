@@ -1,9 +1,6 @@
-# CLAUDE.md — mcp-indexer
+# CLAUDE.md — mcp-code-indexer
 
 Operational map for the code-intelligence engine. Full rationale in [`docs/DESIGN.md`](docs/DESIGN.md); usage in [`README.md`](README.md).
-
-> Repo-wide context & memory: [`../.claude/`](../.claude/README.md) — esp.
-> [`memory.md`](../.claude/memory.md) (history/decisions) and [`indexer.md`](../.claude/indexer.md).
 
 ## Commands (turbo, from this dir)
 
@@ -12,12 +9,13 @@ pnpm build      # topo build: code-graph-core → _shared → code-indexer → i
 pnpm typecheck  # tsc --noEmit across packages
 pnpm lint       # eslint, shared flat config
 pnpm test       # vitest (schemas + engine) + node:test (server) + web
-pnpm index:app  # index sibling ../app → app/.code-graph/graph.json
-pnpm serve:app  # HTTP+WS server :3002 (INDEXER_ROOT=../app)
-pnpm ui         # 3D web viewer :5182 (proxies /api + /ws → :3002)
+pnpm index --root <path>   # index any repo → <path>/.code-graph/graph.json
+pnpm serve --root <path>   # HTTP+WS server :3002, serving the built UI
+pnpm ui                    # Vite dev server :5182 (proxies /api + /ws → :3002)
+pnpm prove                 # run the engine against a corpus of real repos
 ```
 
-> `pnpm build` is required before running the CLI/MCP (compiled JS) or the server (runs via tsx but imports the compiled engine). If `pnpm` errors with "no importer manifest," you're in the wrong cwd — use `pnpm -C /abs/path/to/mcp-indexer`.
+> `pnpm build` is required before running the CLI/MCP (compiled JS) or the server (runs via tsx but imports the compiled engine). If `pnpm` errors with "no importer manifest," you're in the wrong cwd — use `pnpm -C /abs/path/to/mcp-code-indexer`.
 
 ## The model (the whole vocabulary)
 

@@ -19,6 +19,12 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+      # npm audit reports nothing on a pnpm workspace (there is no
+      # package-lock.json for it to read), which is how advisories accumulate
+      # unseen. pnpm audit exits non-zero on any finding and ignores
+      # --audit-level, so the gate lives in a script instead.
+      - name: Audit dependencies
+        run: node scripts/audit-gate.mjs
       - run: pnpm build
       - run: pnpm typecheck
       - run: pnpm lint

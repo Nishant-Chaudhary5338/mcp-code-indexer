@@ -162,7 +162,7 @@ npx code-graph-indexer embed --root .        # compute embeddings (one-time, the
 npx code-graph-indexer query semantic --query "logic that decides who can access a record" --root .
 ```
 
-Runs the local **`Xenova/all-MiniLM-L6-v2`** model (384-dim) via [transformers.js](https://github.com/xenova/transformers.js) — on your machine, no API key, nothing leaves the box. It's an optional dependency: if the model isn't installed, semantic queries fall back to lexical search with a hint. Embeddings are incremental — only changed nodes get re-embedded.
+Runs the local **`all-MiniLM-L6-v2`** model (384-dim) via [`@huggingface/transformers`](https://github.com/huggingface/transformers.js) — on your machine, no API key, nothing leaves the box. It's an optional dependency: if the model isn't installed, semantic queries fall back to lexical search with a hint. Embeddings are incremental — only changed nodes get re-embedded.
 
 ### 5. HTTP + WebSocket server — `serve`
 
@@ -208,7 +208,7 @@ import type { GraphSnapshot } from 'code-graph-indexer/core';   // the schema / 
 ## Requirements
 
 - **Node ≥ 20.19**
-- Optional: the local **`claude` CLI** for zero-key AI chat, and the **transformers.js** model for semantic search. Both degrade gracefully when absent.
+- Optional: the local **`claude` CLI** for zero-key AI chat, and the **Transformers.js** model for semantic search. Both degrade gracefully when absent.
 
 ## License
 

@@ -1,4 +1,4 @@
-# Design Notes — mcp-indexer
+# Design Notes — mcp-code-indexer
 
 The reasoning behind the indexer: why a code **graph** instead of a file tree, how the engine is built, the decisions I made and what I traded away. The [README](../README.md) covers what it is and how to run it; this is how I was thinking.
 

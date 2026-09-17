@@ -15,19 +15,15 @@ Everything is built on [`ts-morph`](https://ts-morph.com), so edges are **resolv
 
 ---
 
-## Why it makes development faster, cheaper, and more reliable
+## Why it exists
 
-Estimated cost of the same question with an agent reading files versus one graph query (typical mid-size repo):
+An agent asked *"what breaks if I change this?"* normally reads a pile of files
+into context and guesses. One graph query answers it exactly, for roughly 1% of
+the tokens — because edges come from the TypeScript resolver, not from grep.
 
-| What you ask                    | Agent alone (read files)            | With the code graph           | You save        |
-| ------------------------------- | ----------------------------------- | ----------------------------- | --------------- |
-| "What calls `format()`?"        | ~30k tokens · ~40s                  | ~0.4k tokens · <1s            | **~99% tokens** |
-| "What breaks if I change this?" | ~50k tokens · ~60s _(misses edges)_ | ~0.6k tokens · <1s _(exact)_  | **~99% tokens** |
-| "Where's the code that does X?" | ~25k tokens · ~30s                  | ~0.3k tokens · ~2s            | **~98% tokens** |
-| "Context to edit this safely"   | ~40k tokens · ~50s _(5 reads)_      | ~0.8k tokens · <1s _(1 call)_ | **~98% tokens** |
-| "Any dead code or cycles?"      | ~60k tokens · manual audit          | ~0.5k tokens · instant        | **~99% tokens** |
-
-**Faster** (in-memory lookups, not re-reads) · **cheaper** (fewer tokens = lower bill) · **reliable** (compiler-resolved edges — no hallucinated callers, no missed impact).
+The numbers behind that claim, and the query-by-query breakdown, are in the
+[package README](packages/code-indexer-dist/README.md#why-it-exists). This file
+is about **working on the engine**; that one is about using it.
 
 ---
 
@@ -101,7 +97,7 @@ Reads, reverse queries, `POST /api/reindex`, `POST /api/chat`, and `WS /ws` for 
 
 ### 5. Semantic search
 
-Local `Xenova/all-MiniLM-L6-v2` embeddings via transformers.js — no API key, nothing leaves the machine. Falls back to lexical search when the model isn't installed.
+Local `all-MiniLM-L6-v2` embeddings (384-dim) via [`@huggingface/transformers`](https://github.com/huggingface/transformers.js) — no API key, nothing leaves the machine. It is an **optional dependency**: if it isn't installed, `semantic_search` degrades to lexical search instead of failing.
 
 ---
 
@@ -153,8 +149,15 @@ code-graph-core ─┬─▶ code-indexer ─▶ indexer-server ─┐
 
 ## Tech
 
-TypeScript (strict) · Turborepo · pnpm workspaces · ts-morph · Zod · Express · ws · @parcel/watcher · React · three.js · Model Context Protocol SDK · transformers.js · Vitest · tsup.
+TypeScript (strict) · Turborepo · pnpm workspaces · ts-morph · Zod · Express · ws · @parcel/watcher · React · three.js · Model Context Protocol SDK · Transformers.js · Vitest · tsup.
 
 ## Status
 
-`pnpm build` ✓ · `pnpm typecheck` ✓ · `pnpm lint` ✓ · `pnpm test` ✓. CI runs the same gate (`build → typecheck → lint → test`) on every push and PR (`.github/workflows/ci.yml`).
+`pnpm build` ✓ · `pnpm typecheck` ✓ · `pnpm lint` ✓ · `pnpm test` ✓. CI runs the same gate on every push and PR (`.github/workflows/ci.yml`):
+
+```
+install → audit (fails on high) → build → typecheck → lint → test
+```
+
+The audit step is explicit because `npm audit` silently reports nothing on a
+pnpm workspace — there's no `package-lock.json` for it to read.

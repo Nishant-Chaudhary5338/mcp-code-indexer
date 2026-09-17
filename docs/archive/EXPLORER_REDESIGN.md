@@ -1,3 +1,17 @@
+> ## 📦 Archived spec — not a description of this repo
+>
+> This is a **design brief for porting the explorer into a different codebase**
+> (`mcp-toolkit/client`), written before that work was scoped. It describes a
+> target that does not exist here, and its "Source app" path (`mcp-indexer/...`)
+> predates this repo's rename.
+>
+> Kept because the visual language and interaction decisions in sections B and D
+> are still the ones the explorer follows. **Read it as history, not as
+> instructions.** For how the explorer actually works today, see
+> [`apps/web/code-graph/README.md`](../../apps/web/code-graph/README.md).
+
+---
+
 # Explorer Redesign — Code-Graph Viewer → `/explorer` in the MCP Toolkit Client
 
 > **Status:** Design spec (ground-up redesign + merge). **Owner:** FE.

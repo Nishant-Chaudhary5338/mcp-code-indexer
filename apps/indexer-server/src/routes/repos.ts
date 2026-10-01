@@ -26,7 +26,8 @@ export const reposRouter = (registry: SessionRegistry): Router => {
     }
     const result = registry.loadGithub(url);
     if ('error' in result) {
-      res.status(400).json({ error: result.error });
+      if (result.busy) res.setHeader('Retry-After', '60');
+      res.status(result.busy ? 503 : 400).json({ error: result.error });
       return;
     }
     const { entry } = result;

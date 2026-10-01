@@ -203,3 +203,66 @@ test('loadGithub updates lastAccess on a second call for the same URL', () => {
   // Suppress "unused variable" warning.
   void firstAccess;
 });
+
+// ---------------------------------------------------------------------------
+// Bounded build queue and failed-entry cleanup
+// ---------------------------------------------------------------------------
+
+test('loadGithub turns new repos away once the pending-build cap is reached', () => {
+  const registry = new SessionRegistry({ maxPendingBuilds: 2 });
+  assert.ok('entry' in registry.loadGithub('https://github.com/cg-test-owner/repo-one'));
+  assert.ok('entry' in registry.loadGithub('https://github.com/cg-test-owner/repo-two'));
+
+  const third = registry.loadGithub('https://github.com/cg-test-owner/repo-three');
+  assert.ok('error' in third);
+  assert.equal(third.busy, true);
+  assert.equal(registry.list().length, 2);
+});
+
+test('a repo already loading is still returned while the queue is full', () => {
+  const registry = new SessionRegistry({ maxPendingBuilds: 1 });
+  const first = registry.loadGithub('https://github.com/cg-test-owner/repo-one');
+  const again = registry.loadGithub('https://github.com/cg-test-owner/repo-one');
+  assert.ok('entry' in first && 'entry' in again);
+  assert.equal(again.entry, first.entry);
+});
+
+test('failed clones are pruned after their grace period, freeing a build slot', () => {
+  const registry = new SessionRegistry({ maxPendingBuilds: 1 });
+  const first = registry.loadGithub('https://github.com/cg-test-owner/repo-one');
+  assert.ok('entry' in first);
+
+  // Simulate the clone having failed long ago.
+  first.entry.status = 'error';
+  first.entry.building = null;
+  first.entry.lastAccess = Date.now() - 11 * 60_000;
+
+  const next = registry.loadGithub('https://github.com/cg-test-owner/repo-two');
+  assert.ok('entry' in next);
+  assert.equal(registry.get(first.entry.id), null);
+});
+
+test('a recent failure is kept so its client can still read the error', () => {
+  const registry = new SessionRegistry({ maxPendingBuilds: 2 });
+  const first = registry.loadGithub('https://github.com/cg-test-owner/repo-one');
+  assert.ok('entry' in first);
+  first.entry.status = 'error';
+  first.entry.building = null;
+
+  registry.loadGithub('https://github.com/cg-test-owner/repo-two');
+  assert.notEqual(registry.get(first.entry.id), null);
+});
+
+test('retrying a failed repo is also turned away while the queue is full', () => {
+  const registry = new SessionRegistry({ maxPendingBuilds: 2 });
+  registry.loadGithub('https://github.com/cg-test-owner/repo-one');
+  const failed = registry.loadGithub('https://github.com/cg-test-owner/repo-two');
+  assert.ok('entry' in failed);
+  failed.entry.status = 'error';
+  failed.entry.building = null;
+  registry.loadGithub('https://github.com/cg-test-owner/repo-three');
+
+  const retry = registry.loadGithub('https://github.com/cg-test-owner/repo-two');
+  assert.ok('error' in retry && retry.busy === true);
+  assert.equal(failed.entry.status, 'error');
+});

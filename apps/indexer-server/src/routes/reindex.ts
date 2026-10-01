@@ -12,6 +12,12 @@ export const reindexRouter = (resolve: GraphResolver): Router => {
     '/reindex',
     limiter,
     asyncHandler(async (req, res) => {
+      // Hosted demo: a full index runs synchronous ts-morph on this thread and
+      // freezes every other request, so the public server never runs one on demand.
+      if (process.env.WEB_DIST) {
+        res.status(403).json({ error: 'Reindexing is disabled in the hosted demo.' });
+        return;
+      }
       const graph = resolveGraphOr(resolve, req, res);
       if (!graph) return;
       // Read-only (cloned) repos are served from a worker-built snapshot; never

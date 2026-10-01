@@ -25,7 +25,13 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends git ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 RUN corepack enable
-COPY --from=build /app ./
+# Run as the image's unprivileged `node` user: this process clones and indexes
+# repos that anyone on the internet can submit, so it should not be root.
+COPY --from=build --chown=node:node /app ./
+RUN chown node:node /app
+USER node
+# Fetch pnpm at build time so a cold start doesn't download it.
+RUN corepack install
 # Serve the built web app from the same origin as the API + WS.
 ENV WEB_DIST=/app/apps/web/code-graph/dist
 # Default listen port. Render/Heroku inject their own PORT (overrides this);

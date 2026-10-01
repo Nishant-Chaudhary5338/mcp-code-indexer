@@ -16,6 +16,18 @@ type Turn = { question: string; result: ChatResult | null; error: string | null 
 
 const EXAMPLES = ['What does the indexer do?', 'Where is the graph rendered?'];
 
+const API_KEY_STORAGE = 'cg-anthropic-key';
+
+const readApiKey = (): string => {
+  try {
+    // Earlier versions kept the key in localStorage indefinitely; drop that copy.
+    localStorage.removeItem(API_KEY_STORAGE);
+    return sessionStorage.getItem(API_KEY_STORAGE) ?? '';
+  } catch {
+    return '';
+  }
+};
+
 export const ChatPanel = ({
   onCite,
   resolveCitation,
@@ -25,16 +37,15 @@ export const ChatPanel = ({
   const [turns, setTurns] = useState<Turn[]>([]);
   const [loading, setLoading] = useState(false);
   // Optional bring-your-own Anthropic key for real answers (else keyword match).
-  // Kept only in this browser; sent per-request and never stored server-side.
-  const [apiKey, setApiKey] = useState(
-    () => localStorage.getItem('cg-anthropic-key') ?? '',
-  );
+  // Kept in sessionStorage so it is gone when the tab closes, sent per request,
+  // and never stored server-side.
+  const [apiKey, setApiKey] = useState(readApiKey);
   const onApiKeyChange = (value: string): void => {
     setApiKey(value);
     try {
-      localStorage.setItem('cg-anthropic-key', value);
+      sessionStorage.setItem(API_KEY_STORAGE, value);
     } catch {
-      /* best-effort */
+      /* storage blocked: the key still works for this page view */
     }
   };
 

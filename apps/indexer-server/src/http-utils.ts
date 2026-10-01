@@ -25,6 +25,30 @@ export const errorHandler = (
 };
 
 /** Terminal 404 handler for unmatched routes. */
+/**
+ * CSP for the served web app. Scripts may only load from this origin, so an
+ * injection bug can't pull in or run attacker script. Styles allow inline
+ * because float-tooltip injects its own <style> tag, and connect-src 'self'
+ * covers the same-origin WebSocket.
+ */
+export const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "frame-ancestors 'none'",
+].join('; ');
+
+export const securityHeaders = (_req: Request, res: Response, next: NextFunction): void => {
+  res.setHeader('Content-Security-Policy', CONTENT_SECURITY_POLICY);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  next();
+};
+
 export const notFoundHandler = (req: Request, res: Response): void => {
   res.status(404).json({ error: `Not found: ${req.method} ${req.path}` });
 };

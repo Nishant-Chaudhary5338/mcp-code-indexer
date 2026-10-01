@@ -135,23 +135,30 @@ const countSourceFiles = (dir: string, cap: number): number => {
  * The temp dir is created OUTSIDE any workspace so the engine's upward
  * workspace-root discovery can't climb into an unrelated project.
  */
+/**
+ * `git clone` arguments for an untrusted repo. `core.symlinks=false` makes git
+ * check symlinks out as plain files holding the link target, so a repo can't
+ * point `src/env.ts` at `/proc/self/environ` or any other host file.
+ */
+export const cloneArgs = (cloneUrl: string, dir: string): string[] => [
+  'clone',
+  '--config',
+  'core.symlinks=false',
+  '--depth',
+  '1',
+  '--single-branch',
+  '--no-tags',
+  cloneUrl,
+  dir,
+];
+
 export const cloneRepo = async (ref: RepoRef): Promise<CloneResult> => {
   const dir = mkdtempSync(path.join(os.tmpdir(), `codeatlas-${ref.id}-`));
 
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(
-      'git',
-      [
-        'clone',
-        '--depth',
-        '1',
-        '--single-branch',
-        '--no-tags',
-        ref.cloneUrl,
-        dir,
-      ],
-      { stdio: ['ignore', 'ignore', 'pipe'] },
-    );
+    const child = spawn('git', cloneArgs(ref.cloneUrl, dir), {
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
 
     let stderr = '';
     child.stderr.setEncoding('utf8');

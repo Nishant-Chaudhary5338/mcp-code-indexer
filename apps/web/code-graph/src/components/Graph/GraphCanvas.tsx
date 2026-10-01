@@ -29,6 +29,7 @@ import {
   type Theme,
 } from '../../lib/graph-style';
 import { useElementSize } from '../../lib/useElementSize';
+import { nodeTooltip } from '../../lib/node-tooltip';
 
 type GraphCanvasProps = {
   index: GraphIndex;
@@ -364,8 +365,7 @@ export const GraphCanvas = ({
         }}
         nodeLabel={(n) => {
           const node = n as ForceNode;
-          const mark = expandable.has(node.id) ? '  ↧ click to open' : '';
-          return `<div style="font:500 12px ui-sans-serif;color:#e4e4e7">${node.name}<span style="color:#71717a"> · ${node.type}${mark}</span></div>`;
+          return nodeTooltip(node.name, node.type, expandable.has(node.id));
         }}
         linkCurvature={perf.curveLinks ? 0.16 : 0}
         linkColor={(l) =>

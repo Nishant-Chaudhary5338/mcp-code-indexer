@@ -14,7 +14,7 @@ import { reposRouter } from './routes/repos.js';
 import type { GraphResolver } from './routes/resolve.js';
 import { attachWsHub, type WsHub } from './ws-hub.js';
 import { startWatcher } from './watcher.js';
-import { errorHandler, notFoundHandler } from './http-utils.js';
+import { errorHandler, notFoundHandler, securityHeaders } from './http-utils.js';
 
 /** The default (always-live) repo's id — the boot/local-dev repo. */
 const DEFAULT_REPO_ID = 'default';
@@ -120,6 +120,7 @@ export function createIndexerApp(opts: {
   // per-IP rate limiters key on it (otherwise every client collapses to the
   // proxy IP and the limits become global).
   if (webDist) app.set('trust proxy', 1);
+  if (webDist) app.use(securityHeaders);
   app.use(cors(buildCorsOptions(Boolean(webDist))));
   app.use(express.json({ limit: '256kb' }));
 

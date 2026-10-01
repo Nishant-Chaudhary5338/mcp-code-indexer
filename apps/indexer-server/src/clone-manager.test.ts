@@ -213,3 +213,44 @@ test('parseGithubUrl: leading-hyphen owner is rejected (shorthand form)', () => 
 test('parseGithubUrl: leading-hyphen owner is rejected (https form)', () => {
   assert.equal(parseGithubUrl('https://github.com/-malicious/repo'), null);
 });
+
+// ---------------------------------------------------------------------------
+// Symlinks in an untrusted repo are checked out as plain files
+// ---------------------------------------------------------------------------
+
+test('cloneArgs checks a symlink out as a plain file, not a link', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { mkdtempSync, writeFileSync, symlinkSync, lstatSync, readFileSync, rmSync } =
+    await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { cloneArgs } = await import('./clone-manager.js');
+
+  const sandbox = mkdtempSync(path.join(os.tmpdir(), 'cg-clone-'));
+  try {
+    const secret = path.join(sandbox, 'secret.env');
+    writeFileSync(secret, 'API_KEY=must-not-leak\n');
+    const src = path.join(sandbox, 'src');
+    const git = (cwd: string, ...args: string[]): void => {
+      execFileSync('git', args, { cwd, stdio: 'ignore' });
+    };
+    execFileSync('git', ['init', '-q', src]);
+    symlinkSync(secret, path.join(src, 'env.ts'));
+    git(src, 'add', 'env.ts');
+    git(src, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'link');
+    const url = `file://${src}`;
+
+    // Control: a plain clone recreates the link, which is what makes it dangerous.
+    const plain = path.join(sandbox, 'plain');
+    git(sandbox, 'clone', '-q', url, plain);
+    assert.equal(lstatSync(path.join(plain, 'env.ts')).isSymbolicLink(), true);
+
+    const safe = path.join(sandbox, 'safe');
+    execFileSync('git', cloneArgs(url, safe), { stdio: 'ignore' });
+    const checkedOut = path.join(safe, 'env.ts');
+    assert.equal(lstatSync(checkedOut).isSymbolicLink(), false);
+    assert.equal(readFileSync(checkedOut, 'utf8'), secret);
+  } finally {
+    rmSync(sandbox, { recursive: true, force: true });
+  }
+});

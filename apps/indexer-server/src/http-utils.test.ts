@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Request, Response, NextFunction } from 'express';
-import { asyncHandler } from './http-utils.js';
+import { asyncHandler, securityHeaders } from './http-utils.js';
 import { queryParam } from './routes/graph.js';
 
 // Minimal Express stand-ins so we can exercise the handler without a server.
@@ -83,4 +83,19 @@ test('queryParam.list splits, trims, drops empties, else undefined', () => {
   assert.equal(queryParam.list(''), undefined);
   assert.equal(queryParam.list(' , , '), undefined);
   assert.equal(queryParam.list(undefined), undefined);
+});
+
+test('securityHeaders locks scripts to the same origin', () => {
+  const headers = new Map<string, string>();
+  const res = { setHeader: (k: string, v: string) => headers.set(k, v) } as unknown as Response;
+  let called = false;
+  securityHeaders(fakeReq(), res, () => {
+    called = true;
+  });
+
+  assert.equal(called, true);
+  const csp = headers.get('Content-Security-Policy') ?? '';
+  assert.match(csp, /script-src 'self'(;|$)/);
+  assert.match(csp, /object-src 'none'/);
+  assert.equal(headers.get('X-Content-Type-Options'), 'nosniff');
 });

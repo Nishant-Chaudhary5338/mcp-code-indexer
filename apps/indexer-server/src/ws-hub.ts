@@ -2,6 +2,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { Server, IncomingMessage } from 'http';
 import type { GraphPatch } from '@repo/code-graph-core';
 import type { SessionRegistry } from './session-registry.js';
+import { isAllowedOrigin } from './origin-policy.js';
 
 type ServerMessage =
   | { kind: 'snapshot-ready'; nodeCount: number; edgeCount: number }
@@ -56,8 +57,25 @@ export const attachWsHub = (
   server: Server,
   registry: SessionRegistry,
   path = '/ws',
+  opts: { hosted?: boolean; maxClients?: number } = {},
 ): WsHub => {
-  const wss = new WebSocketServer({ server, path });
+  const maxClients = opts.maxClients ?? Number(process.env.MAX_WS_CLIENTS ?? 200);
+  const wss: WebSocketServer = new WebSocketServer({
+    server,
+    path,
+    // Only pages we serve (or trust) may subscribe, and the socket count is
+    // capped: each socket gets the full graph on connect, so an open-ended
+    // flood of handshakes is a cheap way to exhaust memory on a public host.
+    verifyClient: (info, done) => {
+      if (!isAllowedOrigin(info.origin, { hosted: opts.hosted ?? false, host: info.req.headers.host })) {
+        done(false, 403, 'Origin not allowed');
+      } else if (wss.clients.size >= maxClients) {
+        done(false, 503, 'Too many live connections');
+      } else {
+        done(true);
+      }
+    },
+  });
 
   wss.on('connection', (socket: TrackedSocket, req: IncomingMessage) => {
     socket.isAlive = true;

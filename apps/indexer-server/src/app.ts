@@ -13,36 +13,19 @@ import { knowledgeRouter } from './routes/knowledge.js';
 import { reposRouter } from './routes/repos.js';
 import type { GraphResolver } from './routes/resolve.js';
 import { attachWsHub, type WsHub } from './ws-hub.js';
+import { isAllowedOrigin } from './origin-policy.js';
 import { startWatcher } from './watcher.js';
-import { errorHandler, notFoundHandler, securityHeaders } from './http-utils.js';
+import { errorHandler, notFoundHandler, rateLimit, securityHeaders } from './http-utils.js';
 
 /** The default (always-live) repo's id — the boot/local-dev repo. */
 const DEFAULT_REPO_ID = 'default';
 
-/**
- * CORS policy. The web app is served from the SAME origin as the API in
- * production, so same-origin and tool requests (no Origin header) are always
- * allowed; localhost dev ports are allowed too; additional origins can be
- * whitelisted via the `CORS_ORIGIN` env (comma-separated).
- */
-const buildCorsOptions = (hosted: boolean): CorsOptions => {
-  const extra = (process.env.CORS_ORIGIN ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return {
-    origin(origin, callback) {
-      // No Origin (same-origin / curl / the bundled SPA) is always allowed.
-      // Localhost dev ports are allowed only in local mode — a public deploy
-      // serves its own SPA same-origin, so it shouldn't trust arbitrary localhost.
-      const allowed =
-        !origin ||
-        extra.includes(origin) ||
-        (!hosted && /^http:\/\/localhost:\d+$/.test(origin));
-      callback(null, allowed);
-    },
-  };
-};
+/** CORS policy: see {@link isAllowedOrigin} for which origins are trusted. */
+const buildCorsOptions = (hosted: boolean): CorsOptions => ({
+  origin(origin, callback) {
+    callback(null, isAllowedOrigin(origin, { hosted }));
+  },
+});
 
 /**
  * Everything a host needs to run the indexer: the configured Express app (routes
@@ -164,6 +147,10 @@ export function createIndexerApp(opts: {
       repos: registry.list().length,
     }),
   );
+  // Hosted demo: a per-client ceiling on all API traffic. The mutating routes
+  // have their own tighter limits; this covers the reads (graph serialization,
+  // cycles, blast radius), which also run on the main thread.
+  if (process.env.WEB_DIST) app.use('/api', rateLimit({ windowMs: 60_000, max: 300 }));
   app.use('/api', reposRouter(registry));
   app.use('/api', graphRouter(resolveGraph));
   app.use('/api', queryRouter(resolveGraph));
@@ -188,7 +175,7 @@ export function createIndexerApp(opts: {
   // but here we hold the reference for symmetry / future host-driven teardown.
   let wsHub: WsHub | null = null;
   const attachWs = (server: Server, path = '/ws'): void => {
-    wsHub = attachWsHub(server, registry, path);
+    wsHub = attachWsHub(server, registry, path, { hosted: Boolean(webDist) });
   };
 
   const indexOnBoot = async (): Promise<void> => {

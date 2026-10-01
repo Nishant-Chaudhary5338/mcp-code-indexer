@@ -47,6 +47,15 @@ export interface RepoSummary {
 const MAX_CONCURRENT_BUILDS = Number(process.env.MAX_CONCURRENT_BUILDS ?? 2);
 /** Cap on resident cloned github repos; least-recently-used are evicted. */
 const MAX_GITHUB_REPOS = 6;
+/**
+ * Cap on github builds in flight or queued. Builds run one or two at a time and
+ * each can take minutes, so without a cap a single client posting new URLs grows
+ * the queue (and this map) faster than it drains and starves everyone else.
+ */
+const MAX_PENDING_BUILDS = Number(process.env.MAX_PENDING_BUILDS ?? 6);
+/** A failed clone stays listed this long so its client sees the error, then goes. */
+const FAILED_ENTRY_TTL_MS = 10 * 60_000;
+const BUSY_MESSAGE = 'The demo is busy indexing other repositories. Try again in a minute.';
 /** Wall-clock budget for one worker index before it's killed. */
 const INDEX_TIMEOUT_MS = 180_000;
 /**
@@ -87,7 +96,31 @@ const toSummary = (entry: RepoEntry): RepoSummary => ({
 export class SessionRegistry {
   private readonly entries = new Map<string, RepoEntry>();
   private readonly buildSlots = new Semaphore(MAX_CONCURRENT_BUILDS);
+  private readonly maxPendingBuilds: number;
   private defaultRepoId: string | null = null;
+
+  constructor(opts: { maxPendingBuilds?: number } = {}) {
+    this.maxPendingBuilds = opts.maxPendingBuilds ?? MAX_PENDING_BUILDS;
+  }
+
+  /** Github builds that are running or waiting for a build slot. */
+  private pendingBuilds(): number {
+    let count = 0;
+    for (const entry of this.entries.values()) {
+      if (entry.origin === 'github' && entry.building !== null) count += 1;
+    }
+    return count;
+  }
+
+  /** Drop failed clones once their client has had time to see the error. */
+  private pruneFailed(now = Date.now()): void {
+    for (const [id, entry] of this.entries) {
+      const expired = now - entry.lastAccess > FAILED_ENTRY_TTL_MS;
+      if (entry.status === 'error' && entry.building === null && !entry.pinned && expired) {
+        this.entries.delete(id);
+      }
+    }
+  }
 
   /** Register the pre-built, always-on default repo (local dev / boot repo). */
   registerLive(id: string, label: string, graph: GraphService): RepoEntry {
@@ -163,10 +196,11 @@ export class SessionRegistry {
   loadGithub(
     url: string,
     opts: { pinned?: boolean } = {},
-  ): { entry: RepoEntry } | { error: string } {
+  ): { entry: RepoEntry } | { error: string; busy?: boolean } {
     const ref = parseGithubUrl(url);
     if (!ref) return { error: 'Not a valid public GitHub repository URL.' };
 
+    this.pruneFailed();
     const existing = this.entries.get(ref.id);
     if (existing) {
       existing.lastAccess = Date.now();
@@ -174,10 +208,12 @@ export class SessionRegistry {
       // Retry a previously-failed clone, but only when no build is in flight —
       // guards against two concurrent retries spawning duplicate clones.
       if (existing.status === 'error' && existing.building === null) {
+        if (this.pendingBuilds() >= this.maxPendingBuilds) return { error: BUSY_MESSAGE, busy: true };
         this.startGithubBuild(existing, ref);
       }
       return { entry: existing };
     }
+    if (this.pendingBuilds() >= this.maxPendingBuilds) return { error: BUSY_MESSAGE, busy: true };
 
     const entry: RepoEntry = {
       id: ref.id,
@@ -230,6 +266,7 @@ export class SessionRegistry {
         } catch (err) {
           entry.status = 'error';
           entry.error = message(err);
+          entry.lastAccess = Date.now();
           if (entry.dir) {
             cleanupClone(entry.dir);
             entry.dir = null;
